@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anti-Detect Browser Manager</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🐬 Anti-Detect Manager</h1>
+    <div class="header-actions">
+      <span id="engine-note">Engine: Camoufox (patched Firefox)</span>
+      <button id="bulk-btn" class="ghost">⚙ Bulk create</button>
+      <button id="new-btn" class="primary">+ New Profile</button>
+    </div>
+  </header>
+
+  <main>
+    <table id="profiles">
+      <thead>
+        <tr>
+          <th>Name</th><th>OS</th><th>Proxy</th><th>Locale</th>
+          <th>Cookies</th><th>Status</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="profiles-body">
+        <tr><td colspan="7" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </main>
+
+  <!-- Profile editor modal -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="modal-title">New Profile</h2>
+        <button id="modal-close" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>Name</label>
+          <input id="f-name" type="text" placeholder="Store account #1" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Operating system</label>
+            <select id="f-os">
+              <option value="">Random</option>
+              <option value="windows">Windows</option>
+              <option value="macos">macOS</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Start URL</label>
+            <input id="f-url" type="text" value="about:blank" />
+          </div>
+        </div>
+
+        <fieldset>
+          <legend>Proxy</legend>
+          <div class="row">
+            <div class="field small">
+              <label>Type</label>
+              <select id="f-ptype">
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+                <option value="socks5">SOCKS5</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Host</label>
+              <input id="f-phost" type="text" placeholder="1.2.3.4" />
+            </div>
+            <div class="field small">
+              <label>Port</label>
+              <input id="f-pport" type="number" placeholder="8080" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Username</label>
+              <input id="f-puser" type="text" />
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input id="f-ppass" type="password" />
+            </div>
+            <div class="field btn-field">
+              <button id="test-proxy" class="ghost">Test</button>
+            </div>
+          </div>
+          <div id="proxy-result" class="proxy-result"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Hardening</legend>
+          <label class="check"><input type="checkbox" id="f-humanize" checked /> Humanize cursor</label>
+          <label class="check"><input type="checkbox" id="f-webrtc" checked /> Block WebRTC leaks</label>
+          <label class="check"><input type="checkbox" id="f-geoip" checked /> Match locale to proxy (GeoIP)</label>
+        </fieldset>
+
+        <div id="fp-preview" class="fp-preview"></div>
+      </div>
+      <div class="modal-foot">
+        <button id="modal-cancel" class="ghost">Cancel</button>
+        <button id="modal-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- First-run engine setup overlay -->
+  <div id="setup" class="setup-overlay hidden">
+    <div class="setup-card">
+      <div class="spinner"></div>
+      <h2>Setting up the browser engine</h2>
+      <p id="setup-msg">Downloading Camoufox (one-time, ~150 MB). This can take a few minutes…</p>
+      <p id="setup-err" class="setup-err hidden"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

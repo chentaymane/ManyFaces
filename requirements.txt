@@ -1,0 +1,13 @@
+# Core web/API
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+httpx>=0.27
+python-multipart>=0.0.9
+
+# Desktop app shell (native window via OS WebView2/EdgeChromium)
+pywebview>=5.0
+
+# Anti-detect browser engine (patched Firefox, native-level fingerprint spoofing)
+camoufox[geoip]>=0.4.0
+browserforge>=1.2.0

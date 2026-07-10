@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "antidetect",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["run.py", "--no-open"],
+      "port": 8000
+    }
+  ]
+}
