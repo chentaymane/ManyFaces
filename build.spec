@@ -7,14 +7,25 @@
 #
 #   pyinstaller build.spec --noconfirm
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 datas = [("web", "web")]
 binaries = []
 hiddenimports = []
 
 # Packages that ship data files and/or dynamic submodules.
-for pkg in ("camoufox", "browserforge", "webview", "language_tags", "screeninfo"):
+# apify_fingerprint_datapoints holds BrowserForge's network-definition zips, loaded
+# at import time — without them, importing camoufox/browserforge and launching a
+# browser both fail with a missing input-network-definition.zip.
+for pkg in (
+    "camoufox",
+    "browserforge",
+    "apify_fingerprint_datapoints",
+    "playwright",   # ships driver/node.exe (~92 MB) that actually drives the browser
+    "webview",
+    "language_tags",
+    "screeninfo",
+):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -22,6 +33,11 @@ for pkg in ("camoufox", "browserforge", "webview", "language_tags", "screeninfo"
         hiddenimports += h
     except Exception:
         pass  # optional packages (e.g. screeninfo) may be absent; skip cleanly
+
+# Belt-and-suspenders: Camoufox's runtime data (webgl_data.db, fonts.json,
+# GeoLite2-City.mmdb, browserforge.yml, launchServer.js) MUST be present, or
+# fingerprint generation and launch fail. Collect them explicitly too.
+datas += collect_data_files("camoufox", include_py_files=False)
 
 # uvicorn/anyio resolve their workers dynamically, so name them explicitly.
 hiddenimports += collect_submodules("uvicorn")

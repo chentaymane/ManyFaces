@@ -57,14 +57,20 @@ def _sample_webgl(os_name: str, rng) -> tuple[str, str]:
     """Return a valid (vendor, renderer) pair for this OS.
 
     Prefers Camoufox's own real-GPU database (guaranteed accepted by `webgl_config`);
-    falls back to a small static list if Camoufox isn't installed.
+    falls back to a small static list of DB-valid pairs on ANY failure (Camoufox not
+    installed, data file missing in a frozen build, etc.) so profile creation can
+    never crash on this.
     """
     try:
         from camoufox.webgl import sample_webgl
-    except ImportError:
-        return rng.choice(_WEBGL_FALLBACK.get(os_name, _WEBGL_FALLBACK["windows"]))
-    data = sample_webgl(_OS_SHORT.get(os_name, "win"))
-    return data.get("webGl:vendor", ""), data.get("webGl:renderer", "")
+
+        data = sample_webgl(_OS_SHORT.get(os_name, "win"))
+        vendor, renderer = data.get("webGl:vendor", ""), data.get("webGl:renderer", "")
+        if vendor and renderer:
+            return vendor, renderer
+    except Exception:  # noqa: BLE001
+        pass
+    return rng.choice(_WEBGL_FALLBACK.get(os_name, _WEBGL_FALLBACK["windows"]))
 
 
 def _sample_fonts(os_name: str, rng) -> list[str]:

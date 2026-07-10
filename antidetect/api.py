@@ -30,11 +30,34 @@ def _startup() -> None:
     db.init()
 
 
+@app.exception_handler(Exception)
+async def _unhandled(request, exc):  # noqa: ANN001
+    """Return the error detail and append a full traceback to ~/.antidetect/error.log.
+
+    In a windowed .exe there's no console, so persisting tracebacks to a file is the
+    only way to diagnose a failure after the fact.
+    """
+    import traceback
+
+    from fastapi.responses import JSONResponse
+
+    try:
+        config.ensure_dirs()
+        with (config.DATA_DIR / "error.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"--- {request.method} {request.url.path} ---\n")
+            fh.write(traceback.format_exc() + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
+
+
 # ------------------------------------------------------------------ engine ----
 # The Camoufox browser (~150 MB) is downloaded to the user cache on first run, so
 # the app itself stays small. These endpoints let the UI show setup progress.
 
-_engine: dict[str, Any] = {"installed": None, "downloading": False, "version": None, "error": None}
+_engine: dict[str, Any] = {
+    "installed": None, "downloading": False, "version": None, "error": None, "detail": None,
+}
 
 
 def _detect_engine() -> None:
@@ -43,8 +66,10 @@ def _detect_engine() -> None:
 
         _engine["version"] = installed_verstr()
         _engine["installed"] = True
-    except Exception:  # noqa: BLE001 - any failure means "not installed yet"
+        _engine["detail"] = None
+    except Exception as exc:  # noqa: BLE001 - any failure means "not installed yet"
         _engine["installed"] = False
+        _engine["detail"] = f"{type(exc).__name__}: {exc}"  # why detection failed
 
 
 @app.get("/api/engine/status")

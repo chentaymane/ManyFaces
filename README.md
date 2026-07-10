@@ -69,6 +69,26 @@ python run.py   # dashboard at http://127.0.0.1:8000
 On Windows the desktop app uses the Edge **WebView2** runtime (preinstalled on
 Windows 10/11; if missing, install "Evergreen WebView2 Runtime" from Microsoft).
 
+## Build a standalone .exe
+
+Package everything (server, UI, Camoufox/BrowserForge data, the Playwright Node
+driver) into one double-clickable executable — no Python needed on the target
+machine:
+
+```bash
+pip install pyinstaller
+pyinstaller build.spec --noconfirm
+```
+
+The result is `dist/AntiDetectManager.exe` (~160 MB). Just launch it — it opens the
+native window and, on first run, downloads the Camoufox browser (~150 MB) into the
+user cache with an in-app progress screen. The build does **not** bundle the browser
+binary, keeping the exe small; the Playwright driver that launches it *is* bundled.
+
+> Verified end-to-end from the packaged exe: server boot, engine detection, profile
+> create / bulk-create, and a real browser launch. Any server error is also written
+> to `%USERPROFILE%\.antidetect\error.log` for troubleshooting (no console needed).
+
 > **Python version note:** verified working on Python 3.14 (Camoufox 135 beta). The
 > management server and API also run without Camoufox installed — everything works
 > except actually launching a browser window, which returns a clear error telling

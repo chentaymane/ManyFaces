@@ -28,13 +28,11 @@ from antidetect import config
 
 
 def _server() -> None:
-    uvicorn.run(
-        "antidetect.api:app",
-        host=config.HOST,
-        port=config.PORT,
-        log_level="warning",
-        reload=False,
-    )
+    # Pass the app OBJECT, not an "antidetect.api:app" import string: uvicorn's
+    # string-based import fails inside a frozen PyInstaller build.
+    from antidetect.api import app
+
+    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
 
 
 def _wait_for_port(host: str, port: int, timeout: float = 20.0) -> bool:
