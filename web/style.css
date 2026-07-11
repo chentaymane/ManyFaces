@@ -98,12 +98,20 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 
 /* First-run engine setup overlay */
 .setup-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.72); backdrop-filter: blur(3px); }
-.setup-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px;
-  padding: 36px 40px; text-align: center; max-width: 440px; box-shadow: 0 12px 48px rgba(0,0,0,.5); }
-.setup-card h2 { margin: 18px 0 8px; color: var(--text); font-size: 18px; }
+  background: rgba(8,10,16,.82); backdrop-filter: blur(4px); }
+.setup-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 16px;
+  padding: 40px 44px; text-align: center; width: 460px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+.setup-logo { font-size: 46px; line-height: 1; margin-bottom: 8px; }
+.setup-card h2 { margin: 10px 0 6px; color: var(--text); font-size: 19px; font-weight: 600; }
 .setup-card p { color: var(--muted); font-size: 13px; margin: 6px 0; }
 .setup-err { color: var(--red) !important; }
-.spinner { width: 42px; height: 42px; margin: 0 auto; border: 4px solid var(--border);
-  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-wrap { margin: 22px 0 10px; height: 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden; }
+.progress-bar { height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #6aa9ff); transition: width .3s ease; }
+.progress-bar.indeterminate { width: 35% !important; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.progress-stats { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+#setup-retry { margin-top: 18px; }

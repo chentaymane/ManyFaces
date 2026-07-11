@@ -252,12 +252,68 @@ async function cookieDialog(id) {
 }
 
 // ------------------------------------------------------------- engine setup ---
-// On first run the Camoufox browser isn't downloaded yet. Show a blocking overlay,
-// trigger the one-time download, and poll until it's ready.
-async function ensureEngine() {
-  const overlay = $("#setup");
+// On first run the Camoufox browser isn't downloaded yet. Show a blocking overlay
+// with a live progress bar, trigger the one-time download, and poll until ready.
+function fmtMB(bytes) { return (bytes / 1048576).toFixed(1) + " MB"; }
+
+function renderEngine(s) {
+  const bar = $("#progress-bar");
+  const pct = $("#progress-pct");
+  const detail = $("#progress-detail");
   const msg = $("#setup-msg");
   const errEl = $("#setup-err");
+  const retry = $("#setup-retry");
+
+  if (s.phase === "error" || s.error) {
+    errEl.classList.remove("hidden");
+    errEl.textContent = `Download failed: ${s.error || "unknown error"}`;
+    msg.textContent = "Check your internet connection and try again.";
+    retry.classList.remove("hidden");
+    bar.classList.add("indeterminate");
+    return;
+  }
+  retry.classList.add("hidden");
+  errEl.classList.add("hidden");
+
+  if (s.phase === "extracting") {
+    msg.textContent = "Installing the browser engine (unpacking files)…";
+    bar.classList.remove("indeterminate");
+    if (s.total > 0) {
+      bar.style.width = s.percent + "%";
+      pct.textContent = s.percent + "%";
+      detail.textContent = `${s.downloaded} / ${s.total} files`;
+    } else {
+      bar.classList.add("indeterminate");
+      pct.textContent = "unpacking…";
+      detail.textContent = "";
+    }
+  } else if (s.phase === "downloading") {
+    msg.textContent = "Downloading the Camoufox browser (~500 MB, one-time setup).";
+    if (s.total > 0) {
+      bar.classList.remove("indeterminate");
+      bar.style.width = s.percent + "%";
+      pct.textContent = s.percent + "%";
+      const speed = s.speed ? " · " + fmtMB(s.speed) + "/s" : "";
+      let eta = "";
+      if (s.speed > 0) {
+        const secs = Math.round((s.total - s.downloaded) / s.speed);
+        eta = secs > 90 ? ` · ~${Math.ceil(secs / 60)} min left` : ` · ~${secs}s left`;
+      }
+      detail.textContent = `${fmtMB(s.downloaded)} / ${fmtMB(s.total)}${speed}${eta}`;
+    } else {
+      bar.classList.add("indeterminate");
+      pct.textContent = fmtMB(s.downloaded);
+      detail.textContent = "starting…";
+    }
+  } else {
+    bar.classList.add("indeterminate");
+    pct.textContent = "";
+    detail.textContent = "";
+  }
+}
+
+async function ensureEngine() {
+  const overlay = $("#setup");
   let status;
   try {
     status = await api("/api/engine/status");
@@ -265,24 +321,44 @@ async function ensureEngine() {
   if (status.installed) return;
 
   overlay.classList.remove("hidden");
-  await api("/api/engine/ensure", { method: "POST" }).catch(() => {});
+  const startDownload = () => api("/api/engine/ensure", { method: "POST" }).catch(() => {});
+  $("#setup-retry").onclick = () => { autoRetries = 0; startDownload(); };
+  await startDownload();
+
+  const MAX_AUTO = 20;   // auto-resume through transient GitHub drops before giving up
+  let autoRetries = 0;
+  let handledError = false;
 
   await new Promise((resolve) => {
     const poll = setInterval(async () => {
       let s;
       try { s = await api("/api/engine/status"); } catch { return; }
-      if (s.error) {
-        errEl.classList.remove("hidden");
-        errEl.textContent = `Download failed: ${s.error}. Retrying is safe — reopen the app.`;
-        msg.textContent = "You can still manage profiles, but launching needs the engine.";
+
+      // Self-heal: on a network error, auto-retry (which RESUMES from disk) a few
+      // times before falling back to the manual Retry button.
+      if (s.phase === "error" && !s.downloading) {
+        if (!handledError && autoRetries < MAX_AUTO) {
+          handledError = true;
+          autoRetries++;
+          $("#setup-msg").textContent = `Connection dropped — resuming (attempt ${autoRetries})…`;
+          $("#setup-err").classList.add("hidden");
+          $("#setup-retry").classList.add("hidden");
+          setTimeout(async () => { await startDownload(); handledError = false; }, 3000);
+          return;
+        }
+        renderEngine(s); // exhausted auto-retries → show manual Retry
+        return;
       }
+      if (s.phase !== "error") handledError = false;
+
+      renderEngine(s);
       if (s.installed) {
         clearInterval(poll);
         overlay.classList.add("hidden");
         toast("Browser engine ready ✓");
         resolve();
       }
-    }, 1500);
+    }, 700);
   });
 }
 

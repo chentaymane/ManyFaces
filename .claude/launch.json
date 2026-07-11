@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "antidetect",
+      "name": "antidetect-server",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["run.py", "--no-open"],
+      "runtimeArgs": ["run.py"],
       "port": 8000
     }
   ]

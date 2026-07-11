@@ -3,7 +3,9 @@ fingerprint tools, and a local automation API.
 """
 from __future__ import annotations
 
+import os
 import threading
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -53,11 +55,23 @@ async def _unhandled(request, exc):  # noqa: ANN001
 
 # ------------------------------------------------------------------ engine ----
 # The Camoufox browser (~150 MB) is downloaded to the user cache on first run, so
-# the app itself stays small. These endpoints let the UI show setup progress.
+# the app itself stays small. We drive the download ourselves (rather than calling
+# Camoufox's built-in fetch) to report real progress to the UI and to enforce a
+# timeout — Camoufox's downloader has none, so a stalled connection hangs forever.
 
 _engine: dict[str, Any] = {
-    "installed": None, "downloading": False, "version": None, "error": None, "detail": None,
+    "installed": None,   # True/False/None(unknown)
+    "downloading": False,
+    "version": None,
+    "phase": "idle",     # idle | downloading | extracting | done | error
+    "downloaded": 0,     # bytes fetched so far
+    "total": 0,          # total bytes (0 if unknown)
+    "percent": 0,        # 0-100
+    "speed": 0,          # bytes/sec (recent)
+    "error": None,       # user-facing error message
+    "detail": None,      # diagnostic detail (why detection failed)
 }
+_engine_lock = threading.Lock()
 
 
 def _detect_engine() -> None:
@@ -72,6 +86,226 @@ def _detect_engine() -> None:
         _engine["detail"] = f"{type(exc).__name__}: {exc}"  # why detection failed
 
 
+def _probe_download(url: str):
+    """Return (total_bytes, supports_range). A range probe is more reliable than HEAD."""
+    import requests
+
+    r = requests.get(url, headers={"Range": "bytes=0-0"}, stream=True, timeout=(15, 60))
+    try:
+        if r.status_code == 206 and "content-range" in r.headers:
+            total = int(r.headers["content-range"].split("/")[-1])
+            return total, True
+        total = int(r.headers.get("content-length", 0))
+        return total, False
+    finally:
+        r.close()
+
+
+def _load_meta(meta_path: str, segments: int) -> list[int]:
+    import json
+
+    try:
+        with open(meta_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        done = data.get("done", [])
+        if isinstance(done, list) and len(done) == segments:
+            return [int(x) for x in done]
+    except Exception:  # noqa: BLE001
+        pass
+    return [0] * segments
+
+
+def _save_meta(meta_path: str, done: list[int]) -> None:
+    import json
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as fh:
+            json.dump({"done": done}, fh)
+    except OSError:
+        pass
+
+
+def _download_resumable(
+    url: str, dest: str, meta_path: str, total: int, on_bytes, segments: int = 8, retries: int = 6
+) -> None:
+    """Download `url` to `dest` with `segments` parallel range requests, RESUMABLY.
+
+    Per-segment byte offsets are persisted to `meta_path`, so a network drop or even
+    closing and reopening the app resumes from where it left off instead of
+    re-downloading the whole ~500 MB file. Each segment also retries with backoff to
+    ride out transient blips (the common failure on throttled/flaky GitHub links).
+    """
+    import concurrent.futures as cf
+    import math
+    import threading
+
+    import requests
+
+    seg_size = math.ceil(total / segments)
+
+    # Reuse an existing partial file only if it's the right size; else start fresh.
+    if os.path.exists(dest) and os.path.getsize(dest) == total:
+        done = _load_meta(meta_path, segments)
+    else:
+        with open(dest, "wb") as fh:
+            fh.truncate(total)
+        done = [0] * segments
+        _save_meta(meta_path, done)
+
+    lock = threading.Lock()
+    save_state = {"t": time.time()}
+
+    def progress() -> None:
+        got = sum(done)
+        on_bytes(got)
+        now = time.time()
+        if now - save_state["t"] >= 1.0:  # persist offsets at most once a second
+            _save_meta(meta_path, done)
+            save_state["t"] = now
+
+    def worker(idx: int) -> None:
+        start = idx * seg_size
+        end = min(start + seg_size, total) - 1
+        if start > end:
+            return
+        last_exc = None
+        for attempt in range(retries):
+            pos = start + done[idx]
+            if pos > end:
+                return
+            try:
+                headers = {"Range": f"bytes={pos}-{end}"}
+                with requests.get(url, headers=headers, stream=True, timeout=(15, 60)) as r:
+                    r.raise_for_status()
+                    with open(dest, "r+b") as fh:
+                        fh.seek(pos)
+                        for chunk in r.iter_content(262144):
+                            if not chunk:
+                                continue
+                            fh.write(chunk)
+                            with lock:
+                                done[idx] += len(chunk)
+                                progress()
+                return
+            except Exception as exc:  # noqa: BLE001 - retry this segment from where it stalled
+                last_exc = exc
+                with lock:
+                    _save_meta(meta_path, done)
+                time.sleep(min(2 * (attempt + 1), 12))
+        raise last_exc  # type: ignore[misc]
+
+    try:
+        with cf.ThreadPoolExecutor(max_workers=segments) as ex:
+            for fut in cf.as_completed([ex.submit(worker, i) for i in range(segments)]):
+                fut.result()  # propagate the first segment that exhausted its retries
+    finally:
+        _save_meta(meta_path, done)
+
+
+def _friendly_error(exc: Exception) -> str:
+    """Turn low-level network errors into an actionable message for the setup screen."""
+    import requests
+
+    name = type(exc).__name__
+    if isinstance(exc, requests.exceptions.ConnectionError) or "NameResolution" in name or "getaddrinfo" in str(exc):
+        return "Network connection to GitHub was lost. Click Retry — the download resumes where it stopped."
+    if isinstance(exc, requests.exceptions.Timeout) or "Timeout" in name:
+        return "The connection stalled. Click Retry — the download resumes where it stopped."
+    return f"{name}: {exc}"
+
+
+def _download_engine() -> None:
+    """Download + install the Camoufox browser, updating _engine progress fields."""
+    import shutil
+    import zipfile
+
+    part = str(config.DATA_DIR / "camoufox-download.zip.part")
+    meta = str(config.DATA_DIR / "camoufox-download.zip.meta")
+
+    try:
+        import requests
+        from camoufox.pkgman import CamoufoxFetcher, INSTALL_DIR
+
+        config.ensure_dirs()
+        _engine.update(phase="downloading", error=None, downloaded=0, total=0, percent=0, speed=0)
+
+        # Resolve the latest supported release (hits GitHub API).
+        fetcher = CamoufoxFetcher()
+        url = fetcher.url
+        total, supports_range = _probe_download(url)
+        _engine["total"] = total
+
+        # Progress callback shared by both download strategies (tracks recent speed).
+        speed_state = {"t": time.time(), "b": 0}
+
+        def on_bytes(got: int) -> None:
+            _engine["downloaded"] = got
+            if total:
+                _engine["percent"] = int(got * 100 / total)
+            now = time.time()
+            if now - speed_state["t"] >= 0.5:
+                _engine["speed"] = int((got - speed_state["b"]) / (now - speed_state["t"]))
+                speed_state["t"] = now
+                speed_state["b"] = got
+
+        if total and supports_range:
+            # Resumable, multi-connection download (survives drops and app restarts).
+            _download_resumable(url, part, meta, total, on_bytes)
+        else:
+            # Fallback: single stream with a timeout so a stall errors out.
+            with requests.get(url, stream=True, timeout=(15, 60)) as resp:
+                resp.raise_for_status()
+                got = 0
+                with open(part, "wb") as fh:
+                    for chunk in resp.iter_content(262144):
+                        if not chunk:
+                            continue
+                        fh.write(chunk)
+                        got += len(chunk)
+                        on_bytes(got)
+
+        # Guard against a truncated download before we try to unzip it.
+        actual = os.path.getsize(part)
+        if total and actual < total:
+            raise IOError(
+                f"Download incomplete ({actual // 1048576} of {total // 1048576} MB). Please retry."
+            )
+
+        # Extract with real per-file progress. Start from a clean install dir so a
+        # previous partial attempt can't leave stale/half files behind.
+        _engine.update(phase="extracting", percent=0, downloaded=0, total=0, speed=0)
+        if INSTALL_DIR.exists():
+            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(part) as zf:
+            members = zf.infolist()
+            count = len(members)
+            _engine["total"] = count
+            for i, member in enumerate(members, 1):
+                zf.extract(member, str(INSTALL_DIR))
+                if i % 40 == 0 or i == count:
+                    _engine["downloaded"] = i
+                    _engine["percent"] = int(i * 100 / count) if count else 100
+        fetcher.set_version()
+
+        # Success — remove the now-consumed download artifacts.
+        for f in (part, meta):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+        _detect_engine()
+        _engine["phase"] = "done" if _engine["installed"] else "error"
+        if not _engine["installed"]:
+            _engine["error"] = "Install finished but the engine was not detected."
+    except Exception as exc:  # noqa: BLE001 - keep the .part file so Retry can resume
+        _engine.update(phase="error", error=_friendly_error(exc))
+    finally:
+        _engine["downloading"] = False
+
+
 @app.get("/api/engine/status")
 def engine_status() -> dict[str, Any]:
     if _engine["installed"] is None:
@@ -82,26 +316,14 @@ def engine_status() -> dict[str, Any]:
 @app.post("/api/engine/ensure")
 def engine_ensure() -> dict[str, Any]:
     """Kick off the one-time browser download in the background (idempotent)."""
-    if _engine["installed"] is None:
-        _detect_engine()
-    if _engine["installed"] or _engine["downloading"]:
-        return _engine
-
-    _engine["downloading"] = True
-    _engine["error"] = None
-
-    def _run() -> None:
-        try:
-            from camoufox.pkgman import camoufox_path
-
-            camoufox_path(download_if_missing=True)
+    with _engine_lock:
+        if _engine["installed"] is None:
             _detect_engine()
-        except Exception as exc:  # noqa: BLE001
-            _engine["error"] = f"{type(exc).__name__}: {exc}"
-        finally:
-            _engine["downloading"] = False
-
-    threading.Thread(target=_run, daemon=True).start()
+        if _engine["installed"] or _engine["downloading"]:
+            return _engine
+        _engine["downloading"] = True
+        _engine["error"] = None
+        threading.Thread(target=_download_engine, daemon=True).start()
     return _engine
 
 

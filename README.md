@@ -56,7 +56,7 @@ Those uses are illegal in many jurisdictions and are not supported.
 # 1. Install Python deps
 pip install -r requirements.txt
 
-# 2. Download the Camoufox browser (one-time, ~150 MB)
+# 2. Download the Camoufox browser (one-time, ~500 MB)
 python -m camoufox fetch
 
 # 3a. Run as a desktop app (native window)
@@ -81,9 +81,18 @@ pyinstaller build.spec --noconfirm
 ```
 
 The result is `dist/AntiDetectManager.exe` (~160 MB). Just launch it — it opens the
-native window and, on first run, downloads the Camoufox browser (~150 MB) into the
-user cache with an in-app progress screen. The build does **not** bundle the browser
-binary, keeping the exe small; the Playwright driver that launches it *is* bundled.
+native window and, on first run, downloads the Camoufox browser (~500 MB) into the
+user cache with an in-app progress screen (live %, MB, speed, and ETA).
+
+The downloader is built for slow/flaky links (e.g. throttled GitHub access):
+- **8 parallel connections** to beat per-connection throttling (~2× faster).
+- **Resumable** — progress is saved to disk, so a dropped connection *or even closing
+  and reopening the app* continues from where it stopped, never restarting the 500 MB.
+- **Self-healing** — auto-retries through transient network drops; a manual Retry
+  button appears if it can't recover on its own.
+
+The build does **not** bundle the browser binary, keeping the exe small; the
+Playwright driver that launches it *is* bundled.
 
 > Verified end-to-end from the packaged exe: server boot, engine detection, profile
 > create / bulk-create, and a real browser launch. Any server error is also written

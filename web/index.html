@@ -113,10 +113,18 @@
   <!-- First-run engine setup overlay -->
   <div id="setup" class="setup-overlay hidden">
     <div class="setup-card">
-      <div class="spinner"></div>
+      <div class="setup-logo">🐬</div>
       <h2>Setting up the browser engine</h2>
-      <p id="setup-msg">Downloading Camoufox (one-time, ~150 MB). This can take a few minutes…</p>
+      <p id="setup-msg">Preparing a one-time download of the Camoufox browser (~500 MB).</p>
+      <div class="progress-wrap">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <div class="progress-stats">
+        <span id="progress-pct">0%</span>
+        <span id="progress-detail"></span>
+      </div>
       <p id="setup-err" class="setup-err hidden"></p>
+      <button id="setup-retry" class="ghost hidden">Retry download</button>
     </div>
   </div>
 
