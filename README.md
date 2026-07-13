@@ -50,24 +50,37 @@ Those uses are illegal in many jurisdictions and are not supported.
 - **Automation API** — drive any profile from your own Python scripts with the full
   fingerprint/proxy/cookies applied (`antidetect.automate.launch`).
 
-## Setup
+## Setup (Windows, Linux & macOS)
+
+Runs on all three. The recommended way is browser mode (`run.py`) — it works
+everywhere with no GUI toolkit needed.
 
 ```bash
-# 1. Install Python deps
+# 1. Install Python deps  (use python3 / pip3 on Linux & macOS)
 pip install -r requirements.txt
 
-# 2. Download the Camoufox browser (one-time, ~500 MB)
+# 2. Download the Camoufox browser for your OS (one-time, ~500 MB)
 python -m camoufox fetch
 
-# 3a. Run as a desktop app (native window)
-python desktop.py
-
-# 3b. …or run as a local web server instead
-python run.py   # dashboard at http://127.0.0.1:8000
+# 3. Start it — opens the dashboard in your normal browser
+python run.py
 ```
 
-On Windows the desktop app uses the Edge **WebView2** runtime (preinstalled on
-Windows 10/11; if missing, install "Evergreen WebView2 Runtime" from Microsoft).
+**Or just double-click a launcher** (does step 3 for you):
+- **Windows:** `START.bat`
+- **Linux / macOS:** `./start.sh`  (first run: `chmod +x start.sh`)
+
+### Optional: native desktop window instead of a browser tab
+
+```bash
+python desktop.py
+```
+- **Windows** uses the Edge **WebView2** runtime (preinstalled on Windows 10/11).
+- **Linux/macOS** need a WebView backend for pywebview — install one of:
+  `pip install "pywebview[qt]"` (Qt) or the GTK stack
+  (`sudo apt install python3-gi gir1.2-webkit2-4.1` on Debian/Ubuntu).
+- If you'd rather not install those, just use `python run.py` — same app, in your
+  browser.
 
 ## Portable package (recommended — no download, works offline)
 
@@ -82,9 +95,15 @@ python package_portable.py            # bundle exe + browser -> dist/AntiDetectM
 ```
 
 This produces `dist/AntiDetectManager-Portable.zip`. The end user just unzips it and
-runs `AntiDetectManager.exe`; the app finds the bundled `browser/` folder next to it
-and launches instantly — **no 500 MB download, no GitHub dependency, fully offline.**
-This sidesteps slow/flaky GitHub access entirely.
+runs the app (`AntiDetectManager.exe` on Windows, `AntiDetectManager` on Linux); it
+finds the bundled `browser/` folder next to it and launches instantly — **no 500 MB
+download, no GitHub dependency, fully offline.** This sidesteps slow/flaky GitHub
+access entirely.
+
+> Build on the OS you're targeting: the bundled Camoufox binary is platform-specific,
+> so build the Windows package on Windows and the Linux package on Linux. The same
+> `build.spec` / `package_portable.py` work on both (the spec omits the Windows-only
+> icon automatically on Linux).
 
 ## Build just the standalone .exe
 

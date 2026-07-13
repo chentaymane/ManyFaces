@@ -69,17 +69,18 @@ def _wait_for_port(host: str, port: int, timeout: float = 20.0) -> bool:
 def main() -> None:
     config.ensure_dirs()
 
-    # Force the WebView2 (Edge) engine to use a FRESH cache each launch, so it can
-    # never serve a stale page (this was the "stuck on setup screen" bug). We point
-    # its user-data folder at our own dir and wipe it on startup.
-    wv2_dir = config.DATA_DIR / "webview2"
-    try:
-        if wv2_dir.exists():
-            shutil.rmtree(wv2_dir, ignore_errors=True)
-        wv2_dir.mkdir(parents=True, exist_ok=True)
-        os.environ["WEBVIEW2_USER_DATA_FOLDER"] = str(wv2_dir)
-    except Exception:  # noqa: BLE001 - non-fatal; app still runs with default cache
-        pass
+    # On Windows, force the WebView2 (Edge) engine to use a FRESH cache each launch
+    # so it can never serve a stale page. Harmless/irrelevant on Linux/macOS (which
+    # use GTK/Qt WebKit backends), so we scope it to Windows.
+    if sys.platform == "win32":
+        wv2_dir = config.DATA_DIR / "webview2"
+        try:
+            if wv2_dir.exists():
+                shutil.rmtree(wv2_dir, ignore_errors=True)
+            wv2_dir.mkdir(parents=True, exist_ok=True)
+            os.environ["WEBVIEW2_USER_DATA_FOLDER"] = str(wv2_dir)
+        except Exception:  # noqa: BLE001 - non-fatal; app still runs with default cache
+            pass
 
     # Claim a port up front (falling back to a free one if the default is taken) so
     # we never collide with a leftover instance and connect to its stale server.

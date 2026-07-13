@@ -7,7 +7,12 @@
 #
 #   pyinstaller build.spec --noconfirm
 
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+
+# Icon is Windows-only (.ico); Linux/macOS builds use no embedded icon here.
+_icon = "assets/icon.ico" if sys.platform == "win32" else None
 
 datas = [("web", "web")]
 binaries = []
@@ -83,5 +88,5 @@ exe = EXE(
     runtime_tmpdir=None,
     console=False,           # windowed app, no terminal
     disable_windowed_traceback=False,
-    icon="assets/icon.ico",
+    icon=_icon,
 )
