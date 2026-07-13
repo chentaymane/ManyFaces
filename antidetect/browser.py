@@ -23,6 +23,34 @@ class BrowserError(RuntimeError):
     pass
 
 
+def activate_bundled_engine() -> bool:
+    """If the app ships a bundled browser, make Camoufox use it without downloading.
+
+    Camoufox reads its version from INSTALL_DIR/version.json even when we pass an
+    explicit executable_path, so we copy that tiny file over from the bundle. The
+    browser binary itself stays in the bundle folder (pointed at via executable_path
+    in build_launch_options) — no multi-hundred-MB copy, no network.
+    Returns True if a bundled browser is present and now usable.
+    """
+    bundle = config.bundled_browser_dir()
+    if not bundle:
+        return False
+    version_src = bundle / "version.json"
+    if not version_src.exists():
+        return False
+    try:
+        from camoufox.pkgman import INSTALL_DIR
+        import shutil
+
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        dst = INSTALL_DIR / "version.json"
+        if not dst.exists():
+            shutil.copy(str(version_src), str(dst))
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _resolve_screen(os_name: str, width: int, height: int):
     """Return a validated Screen constraint near the target size, or None.
 
@@ -82,6 +110,9 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         "geoip": geoip_active,
         "config": cfg,
     }
+    bundled_exe = config.bundled_browser_exe()
+    if bundled_exe:
+        opts["executable_path"] = bundled_exe  # use the shipped browser, never download
     webgl = fp.webgl_config()
     if webgl is not None:
         opts["webgl_config"] = webgl  # pins GPU consistently across launches

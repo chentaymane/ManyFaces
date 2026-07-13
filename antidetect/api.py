@@ -32,6 +32,21 @@ def _startup() -> None:
     db.init()
 
 
+@app.middleware("http")
+async def _no_cache(request, call_next):
+    """Stop the embedded WebView2/Edge browser from caching responses.
+
+    Without this, the desktop shell caches GET responses (notably the engine status
+    and the JS/HTML) and can keep serving a stale "not installed" from the very first
+    run — leaving the setup screen stuck forever across restarts.
+    """
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.exception_handler(Exception)
 async def _unhandled(request, exc):  # noqa: ANN001
     """Return the error detail and append a full traceback to ~/.antidetect/error.log.
@@ -75,6 +90,11 @@ _engine_lock = threading.Lock()
 
 
 def _detect_engine() -> None:
+    # A portable build ships the browser alongside the app; activating it writes the
+    # version shim so the check below passes without any download.
+    from .browser import activate_bundled_engine
+
+    activate_bundled_engine()
     try:
         from camoufox.pkgman import installed_verstr
 
@@ -308,7 +328,11 @@ def _download_engine() -> None:
 
 @app.get("/api/engine/status")
 def engine_status() -> dict[str, Any]:
-    if _engine["installed"] is None:
+    # Re-detect whenever we don't yet believe the engine is installed (and aren't
+    # mid-download). This self-heals a stale "not installed" from a startup race or
+    # an engine that got installed out-of-band (e.g. `camoufox fetch`), so the UI
+    # never stays stuck on the setup screen once the browser is actually present.
+    if not _engine["installed"] and not _engine["downloading"]:
         _detect_engine()
     return _engine
 
@@ -317,8 +341,9 @@ def engine_status() -> dict[str, Any]:
 def engine_ensure() -> dict[str, Any]:
     """Kick off the one-time browser download in the background (idempotent)."""
     with _engine_lock:
-        if _engine["installed"] is None:
-            _detect_engine()
+        # Always re-check first so a startup-race click never re-downloads a browser
+        # that is actually already installed.
+        _detect_engine()
         if _engine["installed"] or _engine["downloading"]:
             return _engine
         _engine["downloading"] = True
@@ -517,9 +542,23 @@ def clear_cookies(profile_id: str) -> None:
 
 # --------------------------------------------------------------- static UI ----
 
+# Unique per server start: appended to app.js/style.css URLs so the browser (esp.
+# the Edge/WebView2 engine, which caches aggressively) can NEVER reuse a stale copy
+# of the frontend across app restarts. This was the root of the "stuck on setup
+# screen" bug — an old cached app.js kept running after the code was fixed.
+import time as _time_mod
+
+_ASSET_VERSION = str(int(_time_mod.time()))
+
 if config.WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(config.WEB_DIR)), name="static")
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(str(config.WEB_DIR / "index.html"))
+    def index() -> "Response":  # noqa: F821
+        from fastapi.responses import HTMLResponse
+
+        html = (config.WEB_DIR / "index.html").read_text(encoding="utf-8")
+        # Version the asset URLs so each server start busts any cached JS/CSS.
+        html = html.replace("/static/app.js", f"/static/app.js?v={_ASSET_VERSION}")
+        html = html.replace("/static/style.css", f"/static/style.css?v={_ASSET_VERSION}")
+        return HTMLResponse(html)

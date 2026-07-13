@@ -316,7 +316,7 @@ async function ensureEngine() {
   const overlay = $("#setup");
   let status;
   try {
-    status = await api("/api/engine/status");
+    status = await api("/api/engine/status?t=" + Date.now());
   } catch { return; } // server not ready; loadProfiles will retry anyway
   if (status.installed) return;
 
@@ -332,7 +332,7 @@ async function ensureEngine() {
   await new Promise((resolve) => {
     const poll = setInterval(async () => {
       let s;
-      try { s = await api("/api/engine/status"); } catch { return; }
+      try { s = await api("/api/engine/status?t=" + Date.now()); } catch { return; }
 
       // Self-heal: on a network error, auto-retry (which RESUMES from disk) a few
       // times before falling back to the manual Retry button.

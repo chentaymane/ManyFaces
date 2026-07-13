@@ -69,11 +69,27 @@ python run.py   # dashboard at http://127.0.0.1:8000
 On Windows the desktop app uses the Edge **WebView2** runtime (preinstalled on
 Windows 10/11; if missing, install "Evergreen WebView2 Runtime" from Microsoft).
 
-## Build a standalone .exe
+## Portable package (recommended — no download, works offline)
 
-Package everything (server, UI, Camoufox/BrowserForge data, the Playwright Node
-driver) into one double-clickable executable — no Python needed on the target
-machine:
+The best way to ship this: a folder containing the app **and the browser engine
+together**, so the end user never downloads anything — they unzip and double-click.
+
+```bash
+pip install pyinstaller
+pyinstaller build.spec --noconfirm    # build the app exe
+python -m camoufox fetch              # ensure the browser is installed locally
+python package_portable.py            # bundle exe + browser -> dist/AntiDetectManager-Portable.zip
+```
+
+This produces `dist/AntiDetectManager-Portable.zip`. The end user just unzips it and
+runs `AntiDetectManager.exe`; the app finds the bundled `browser/` folder next to it
+and launches instantly — **no 500 MB download, no GitHub dependency, fully offline.**
+This sidesteps slow/flaky GitHub access entirely.
+
+## Build just the standalone .exe
+
+If you prefer a single small exe that downloads the browser on first run (needs a
+working connection), build only the executable:
 
 ```bash
 pip install pyinstaller

@@ -1,10 +1,10 @@
-565 INFO: PyInstaller: 6.21.0, contrib hooks: 2026.6
-566 INFO: Python: 3.14.2
-676 INFO: Platform: Windows-10-10.0.19045-SP0
-676 INFO: Python environment: C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64
-352 WARNING: Failed to collect submodules for 'browserforge.injectors.undetected_playwright' because importing 'browserforge.injectors.undetected_playwright' raised: ModuleNotFoundError: No module named 'undetected_playwright'
-359 WARNING: Failed to collect submodules for 'webview.platforms.android' because importing 'webview.platforms.android' raised: ModuleNotFoundError: No module named 'android'
-17165 INFO: Module search paths (PYTHONPATH):
+234 INFO: PyInstaller: 6.21.0, contrib hooks: 2026.6
+234 INFO: Python: 3.14.2
+276 INFO: Platform: Windows-10-10.0.19045-SP0
+276 INFO: Python environment: C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64
+276 WARNING: Failed to collect submodules for 'browserforge.injectors.undetected_playwright' because importing 'browserforge.injectors.undetected_playwright' raised: ModuleNotFoundError: No module named 'undetected_playwright'
+332 WARNING: Failed to collect submodules for 'webview.platforms.android' because importing 'webview.platforms.android' raised: ModuleNotFoundError: No module named 'android'
+12651 INFO: Module search paths (PYTHONPATH):
 ['C:\\Users\\chent\\Desktop\\multi',
  'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\python314.zip',
  'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\DLLs',
@@ -12,168 +12,149 @@
  'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64',
  'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages',
  'C:\\Users\\chent\\Desktop\\multi']
-18214 INFO: Appending 'binaries' from .spec
-18215 INFO: Appending 'datas' from .spec
-18262 INFO: checking Analysis
-18262 INFO: Building Analysis because Analysis-00.toc is non existent
-18262 INFO: Looking for Python shared library...
-18262 INFO: Using Python shared library: C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64\python314.dll
-18262 INFO: Running Analysis Analysis-00.toc
-18262 INFO: Target bytecode optimization level: 0
-18262 INFO: Initializing module dependency graph...
-18264 INFO: Initializing module graph hook caches...
-18300 INFO: Analyzing modules for base_library.zip ...
-22339 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-23584 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-24231 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-24566 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-24597 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-31345 INFO: Caching module dependency graph...
-31454 INFO: Analyzing C:\Users\chent\Desktop\multi\desktop.py
-31467 INFO: Processing standard module hook 'hook-uvicorn.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-33664 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-34037 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-35027 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-35039 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-36966 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-36969 INFO: SetuptoolsInfo: initializing cached setuptools info...
-39463 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-40636 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-41149 INFO: Processing standard module hook 'hook-websockets.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-43003 INFO: Processing standard module hook 'hook-anyio.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-45974 INFO: Processing standard module hook 'hook-pydantic.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-47783 INFO: Processing standard module hook 'hook-rich.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-49590 INFO: Processing standard module hook 'hook-pygments.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-55797 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-60174 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-61046 INFO: Processing standard module hook 'hook-orjson.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-61072 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-61379 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-61380 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
-61398 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-61442 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-61538 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-61540 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
-61570 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-61571 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
-62196 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-62980 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-62985 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-64453 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-64455 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
-65977 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-65978 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
-67948 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-68165 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-68689 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-68741 INFO: Processing standard module hook 'hook-platformdirs.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-69178 INFO: Processing standard module hook 'hook-pandas.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-72456 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-84819 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-92021 INFO: Processing standard module hook 'hook-pandas.plotting.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-93570 INFO: Processing standard module hook 'hook-dateutil.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-93971 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-97719 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-98031 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-98877 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-99350 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-100315 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-100637 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-102202 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-105473 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-105886 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-108760 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-108762 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
-108840 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-108911 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-108913 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
-109056 INFO: Processing standard module hook 'hook-playwright.async_api.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\patchright\\_impl\\__pyinstaller'
-113590 INFO: Processing standard module hook 'hook-playwright.sync_api.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\patchright\\_impl\\__pyinstaller'
-116642 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\webview\\__pyinstaller'
-117831 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-118193 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\pythonnet\\_pyinstaller'
-118286 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-118579 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-120980 INFO: Analyzing hidden import 'camoufox.__main__'
-121011 INFO: Analyzing hidden import 'browserforge.__main__'
-121015 INFO: Analyzing hidden import 'browserforge.injectors'
-121027 INFO: Analyzing hidden import 'browserforge.injectors.data'
-121029 INFO: Analyzing hidden import 'browserforge.injectors.playwright'
-121042 INFO: Analyzing hidden import 'playwright.__main__'
-121045 INFO: Analyzing hidden import 'playwright._impl.__pyinstaller'
-121049 INFO: Analyzing hidden import 'playwright._impl._path_utils'
-121053 INFO: Analyzing hidden import 'webview.__pyinstaller'
-121055 INFO: Analyzing hidden import 'webview.__pyinstaller.hook-webview'
-121144 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-124555 INFO: Analyzing hidden import 'webview._version'
-124557 INFO: Analyzing hidden import 'screeninfo.__main__'
-124562 INFO: Analyzing hidden import 'uvicorn.__main__'
-124565 INFO: Analyzing hidden import 'uvicorn.lifespan'
-124566 INFO: Analyzing hidden import 'uvicorn.lifespan.off'
-124570 INFO: Analyzing hidden import 'uvicorn.lifespan.on'
-124589 INFO: Analyzing hidden import 'uvicorn.loops'
-124590 INFO: Analyzing hidden import 'uvicorn.loops.asyncio'
-124592 INFO: Analyzing hidden import 'uvicorn.loops.auto'
-124599 INFO: Analyzing hidden import 'uvicorn.protocols.http.auto'
-124601 INFO: Analyzing hidden import 'uvicorn.protocols.websockets.auto'
-124605 INFO: Analyzing hidden import 'uvicorn.workers'
-124617 INFO: Analyzing hidden import 'anyio._backends._asyncio'
-124974 INFO: Processing module hooks (post-graph stage)...
-125731 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-125775 WARNING: Hidden import "pycparser.lextab" not found!
-125775 WARNING: Hidden import "pycparser.yacctab" not found!
-128551 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
-135741 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-135743 INFO: Processing standard module hook 'hook-tzdata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-136921 INFO: Performing binary vs. data reclassification (1216 entries)
-137577 INFO: Looking for ctypes DLLs
-137937 INFO: Analyzing run-time hooks ...
-137955 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-137961 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-137967 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-137974 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-138105 INFO: Creating base_library.zip...
-138158 INFO: Looking for dynamic libraries
-144308 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\numpy.libs', 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\pandas.libs']
-144308 INFO: Extra DLL search directories (PATH): []
-147951 INFO: Warnings written to C:\Users\chent\Desktop\multi\build\build\warn-build.txt
-148392 INFO: Graph cross-reference written to C:\Users\chent\Desktop\multi\build\build\xref-build.html
-148620 INFO: checking PYZ
-148620 INFO: Building PYZ because PYZ-00.toc is non existent
-148620 INFO: Building PYZ (ZlibArchive) C:\Users\chent\Desktop\multi\build\build\PYZ-00.pyz
-151420 INFO: Building PYZ (ZlibArchive) C:\Users\chent\Desktop\multi\build\build\PYZ-00.pyz completed successfully.
-151578 INFO: checking PKG
-151578 INFO: Building PKG because PKG-00.toc is non existent
-151578 INFO: Building PKG (CArchive) AntiDetectManager.pkg
-188118 INFO: Building PKG (CArchive) AntiDetectManager.pkg completed successfully.
-188188 INFO: Bootloader C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
-188188 INFO: checking EXE
-188188 INFO: Building EXE because EXE-00.toc is non existent
-188189 INFO: Building EXE from EXE-00.toc
-188190 INFO: Copying bootloader EXE to C:\Users\chent\Desktop\multi\dist\AntiDetectManager.exe
-188553 INFO: Copying icon to EXE
-188645 INFO: Copying 0 resources to EXE
-188645 INFO: Embedding manifest in EXE
-188739 INFO: Appending PKG archive to EXE
-189129 INFO: Fixing EXE headers
-190106 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #1 / 20: OSError(22, 'Invalid argument'). Retrying in 0.05 second(s)...
-190563 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #2 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-190998 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #3 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-191437 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #4 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-191896 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #5 / 20: OSError(22, 'Invalid argument'). Retrying in 0.07 second(s)...
-192420 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #6 / 20: OSError(22, 'Invalid argument'). Retrying in 0.07 second(s)...
-192846 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #7 / 20: OSError(22, 'Invalid argument'). Retrying in 0.08 second(s)...
-193273 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #8 / 20: OSError(22, 'Invalid argument'). Retrying in 0.08 second(s)...
-193764 WARNING: Execution of 'set_exe_build_timestamp' failed on attempt #9 / 20: OSError(22, 'Invalid argument'). Retrying in 0.09 second(s)...
-195751 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #1 / 20: OSError(22, 'Invalid argument'). Retrying in 0.05 second(s)...
-196346 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #2 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-196863 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #3 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-197418 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #4 / 20: OSError(22, 'Invalid argument'). Retrying in 0.06 second(s)...
-197896 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #5 / 20: OSError(22, 'Invalid argument'). Retrying in 0.07 second(s)...
-198385 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #6 / 20: OSError(22, 'Invalid argument'). Retrying in 0.07 second(s)...
-198841 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #7 / 20: OSError(22, 'Invalid argument'). Retrying in 0.08 second(s)...
-199323 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #8 / 20: OSError(22, 'Invalid argument'). Retrying in 0.08 second(s)...
-199833 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #9 / 20: OSError(22, 'Invalid argument'). Retrying in 0.09 second(s)...
-200404 WARNING: Execution of 'update_exe_pe_checksum' failed on attempt #10 / 20: OSError(22, 'Invalid argument'). Retrying in 0.10 second(s)...
-201552 INFO: Building EXE from EXE-00.toc completed successfully.
-201620 INFO: Build complete! The results are available in: C:\Users\chent\Desktop\multi\dist
+13588 INFO: Appending 'binaries' from .spec
+13589 INFO: Appending 'datas' from .spec
+13643 INFO: checking Analysis
+13643 INFO: Building Analysis because Analysis-00.toc is non existent
+13643 INFO: Looking for Python shared library...
+13643 INFO: Using Python shared library: C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64\python314.dll
+13643 INFO: Running Analysis Analysis-00.toc
+13643 INFO: Target bytecode optimization level: 0
+13644 INFO: Initializing module dependency graph...
+13645 INFO: Initializing module graph hook caches...
+13685 INFO: Analyzing modules for base_library.zip ...
+16745 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+17817 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+18328 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+18585 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+18610 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+23675 INFO: Caching module dependency graph...
+23737 INFO: Analyzing C:\Users\chent\Desktop\multi\desktop.py
+23745 INFO: Processing standard module hook 'hook-uvicorn.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+24967 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+25153 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+25769 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+25779 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+27301 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+27303 INFO: SetuptoolsInfo: initializing cached setuptools info...
+29244 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+30192 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+30794 INFO: Processing standard module hook 'hook-websockets.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+32334 INFO: Processing standard module hook 'hook-anyio.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+35208 INFO: Processing standard module hook 'hook-pydantic.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+36626 INFO: Processing standard module hook 'hook-rich.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+38025 INFO: Processing standard module hook 'hook-pygments.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+42901 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+46469 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+47202 INFO: Processing standard module hook 'hook-orjson.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+47222 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+47480 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+47481 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+47495 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+47525 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+47592 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+47593 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+47616 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+47617 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+48165 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+48925 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+48928 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+50179 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+50181 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+51664 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+51665 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+53418 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+53563 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54167 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+54203 INFO: Processing standard module hook 'hook-platformdirs.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54584 INFO: Processing standard module hook 'hook-pandas.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+59422 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+71047 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+76585 INFO: Processing standard module hook 'hook-pandas.plotting.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+77689 INFO: Processing standard module hook 'hook-dateutil.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+77968 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+79805 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+80037 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+80596 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+80991 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+81737 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+81983 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+83407 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+86582 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+86892 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+89159 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+89161 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+89233 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+89300 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+89301 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+89408 INFO: Processing standard module hook 'hook-playwright.async_api.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\patchright\\_impl\\__pyinstaller'
+93310 INFO: Processing standard module hook 'hook-playwright.sync_api.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\patchright\\_impl\\__pyinstaller'
+95584 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\webview\\__pyinstaller'
+96438 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+96700 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\pythonnet\\_pyinstaller'
+96769 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+96992 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+98845 INFO: Analyzing hidden import 'camoufox.__main__'
+98866 INFO: Analyzing hidden import 'browserforge.__main__'
+98869 INFO: Analyzing hidden import 'browserforge.injectors'
+98878 INFO: Analyzing hidden import 'browserforge.injectors.data'
+98879 INFO: Analyzing hidden import 'browserforge.injectors.playwright'
+98887 INFO: Analyzing hidden import 'playwright.__main__'
+98889 INFO: Analyzing hidden import 'playwright._impl.__pyinstaller'
+98891 INFO: Analyzing hidden import 'playwright._impl._path_utils'
+98894 INFO: Analyzing hidden import 'webview.__pyinstaller'
+98895 INFO: Analyzing hidden import 'webview.__pyinstaller.hook-webview'
+98958 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+101375 INFO: Analyzing hidden import 'webview._version'
+101377 INFO: Analyzing hidden import 'screeninfo.__main__'
+101380 INFO: Analyzing hidden import 'uvicorn.__main__'
+101381 INFO: Analyzing hidden import 'uvicorn.lifespan'
+101382 INFO: Analyzing hidden import 'uvicorn.lifespan.off'
+101385 INFO: Analyzing hidden import 'uvicorn.lifespan.on'
+101397 INFO: Analyzing hidden import 'uvicorn.loops'
+101398 INFO: Analyzing hidden import 'uvicorn.loops.asyncio'
+101401 INFO: Analyzing hidden import 'uvicorn.loops.auto'
+101405 INFO: Analyzing hidden import 'uvicorn.protocols.http.auto'
+101406 INFO: Analyzing hidden import 'uvicorn.protocols.websockets.auto'
+101409 INFO: Analyzing hidden import 'uvicorn.workers'
+101418 INFO: Analyzing hidden import 'anyio._backends._asyncio'
+101731 INFO: Processing module hooks (post-graph stage)...
+102289 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+102322 WARNING: Hidden import "pycparser.lextab" not found!
+102322 WARNING: Hidden import "pycparser.yacctab" not found!
+104199 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks'
+110411 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+110413 INFO: Processing standard module hook 'hook-tzdata.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+111524 INFO: Performing binary vs. data reclassification (1216 entries)
+111970 INFO: Looking for ctypes DLLs
+112273 INFO: Analyzing run-time hooks ...
+112291 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+112297 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+112303 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+112309 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+112404 INFO: Creating base_library.zip...
+112441 INFO: Looking for dynamic libraries
+118052 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\numpy.libs', 'C:\\Users\\chent\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\site-packages\\pandas.libs']
+118053 INFO: Extra DLL search directories (PATH): []
+120946 INFO: Warnings written to C:\Users\chent\Desktop\multi\build\build\warn-build.txt
+121275 INFO: Graph cross-reference written to C:\Users\chent\Desktop\multi\build\build\xref-build.html
+121458 INFO: checking PYZ
+121458 INFO: Building PYZ because PYZ-00.toc is non existent
+121458 INFO: Building PYZ (ZlibArchive) C:\Users\chent\Desktop\multi\build\build\PYZ-00.pyz
+123714 INFO: Building PYZ (ZlibArchive) C:\Users\chent\Desktop\multi\build\build\PYZ-00.pyz completed successfully.
+123849 INFO: checking PKG
+123849 INFO: Building PKG because PKG-00.toc is non existent
+123849 INFO: Building PKG (CArchive) AntiDetectManager.pkg
+153010 INFO: Building PKG (CArchive) AntiDetectManager.pkg completed successfully.
+153060 INFO: Bootloader C:\Users\chent\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+153060 INFO: checking EXE
+153060 INFO: Building EXE because EXE-00.toc is non existent
+153060 INFO: Building EXE from EXE-00.toc
+153060 INFO: Copying bootloader EXE to C:\Users\chent\Desktop\multi\dist\AntiDetectManager.exe
+153168 INFO: Copying icon to EXE
+153235 INFO: Copying 0 resources to EXE
+153235 INFO: Embedding manifest in EXE
+153323 INFO: Appending PKG archive to EXE
+153769 INFO: Fixing EXE headers
+156071 INFO: Building EXE from EXE-00.toc completed successfully.
+156121 INFO: Build complete! The results are available in: C:\Users\chent\Desktop\multi\dist

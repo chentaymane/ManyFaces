@@ -31,6 +31,35 @@ def _web_dir() -> Path:
 # Web dashboard static files.
 WEB_DIR = _web_dir()
 
+
+def bundled_browser_dir() -> Path | None:
+    """Locate a browser shipped alongside the app, if present.
+
+    A portable build places the Camoufox browser in a `browser/` folder next to the
+    executable so the app never has to download it. Returns the folder only if it
+    actually contains the browser binary; otherwise None (fall back to downloading).
+    """
+    if getattr(sys, "frozen", False):
+        candidates = [Path(sys.executable).parent / "browser"]
+    else:
+        candidates = [Path(__file__).parent.parent / "browser"]
+    for cand in candidates:
+        if (cand / "camoufox.exe").exists() or (cand / "camoufox").exists():
+            return cand
+    return None
+
+
+def bundled_browser_exe() -> str | None:
+    """Path to the bundled Camoufox executable, or None if not shipped."""
+    d = bundled_browser_dir()
+    if not d:
+        return None
+    for name in ("camoufox.exe", "camoufox"):
+        exe = d / name
+        if exe.exists():
+            return str(exe)
+    return None
+
 # Server bind.
 HOST = os.environ.get("ANTIDETECT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ANTIDETECT_PORT", "8000"))
