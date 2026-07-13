@@ -363,8 +363,10 @@ async function ensureEngine() {
 }
 
 // ---------------------------------------------------------------------- init ---
-(async () => {
-  await ensureEngine();
-  loadProfiles();
-  setInterval(loadProfiles, 5000); // keep running status fresh
-})();
+// Go straight to the dashboard. The browser engine ships with the app (or is
+// already installed), so we never block the UI on a setup/download screen. If the
+// engine is genuinely missing, launching a profile surfaces a clear error instead.
+$("#setup")?.classList.add("hidden");
+$("#setup")?.remove();
+loadProfiles();
+setInterval(loadProfiles, 5000); // keep running status fresh
