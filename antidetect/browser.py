@@ -82,7 +82,7 @@ def _resolve_screen(os_name: str, width: int, height: int):
     return None
 
 
-def _apply_mobile_webgl(cfg: dict[str, Any], vendor: str, renderer: str) -> None:
+def _apply_mobile_webgl(cfg: dict[str, Any], vendor: str, renderer: str, base_os: str = "lin") -> None:
     """Make a mobile profile's WebGL report the phone GPU, masked AND unmasked.
 
     Camoufox ships only a desktop GPU database, so we take a base bundle and rewrite
@@ -92,13 +92,16 @@ def _apply_mobile_webgl(cfg: dict[str, Any], vendor: str, renderer: str) -> None
     WEBGL_debug_renderer_info. The remaining GL params/extensions stay desktop-derived
     (no mobile GPU data exists to source them from). We inject the whole bundle into
     `cfg`, so Camoufox's own (desktop) sample never overwrites it.
+
+    `base_os` picks which desktop GPU family the untouched params come from — "mac"
+    for iOS (Apple GL params are the closest match to an iPhone), "lin" for Android.
     """
     try:
         from camoufox.webgl import sample_webgl
     except Exception:  # noqa: BLE001 - engine missing; skip, launch will report it
         return
     try:
-        bundle = sample_webgl("lin")
+        bundle = sample_webgl(base_os)
     except Exception:  # noqa: BLE001
         return
     bundle.pop("webGl2Enabled", None)  # a control flag, not a config property
@@ -142,9 +145,10 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         # viewport is redundant anyway.
         "no_viewport": True,
         "user_data_dir": str(config.profile_data_dir(profile.id)),
-        # Camoufox only accepts desktop OS names; an Android profile runs on the
-        # Linux engine with its identity spoofed to a phone via `config`.
-        "os": "linux" if fp.is_mobile else fp.os,
+        # Camoufox only accepts desktop OS names, so a phone profile runs on the
+        # nearest desktop engine with its identity spoofed via `config`: Android on
+        # Linux (both Gecko/ARM-ish), iOS on macOS (Apple GPU + Apple GL params).
+        "os": ("macos" if fp.os == "ios" else "linux") if fp.is_mobile else fp.os,
         "locale": fp.locale,
         "humanize": profile.humanize,
         "block_webrtc": profile.block_webrtc,
@@ -162,7 +166,10 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         # (custom_fonts_only stops Camoufox merging the desktop font set, which
         # would otherwise leak a desktop identity). Screen dims are pinned in
         # `cfg`, so no BrowserForge Screen constraint is used here.
-        _apply_mobile_webgl(cfg, fp.webgl_vendor, fp.webgl_renderer)
+        _apply_mobile_webgl(
+            cfg, fp.webgl_vendor, fp.webgl_renderer,
+            base_os="mac" if fp.os == "ios" else "lin",
+        )
         opts["window"] = (fp.screen_width, fp.screen_height)
         if fp.fonts:
             opts["fonts"] = fp.fonts
@@ -261,8 +268,14 @@ class BrowserSession:
             while not self._stop.is_set():
                 if self._stop.wait(timeout=1.0):
                     break
-                if not getattr(browser, "pages", [None]):
-                    break  # user closed the last tab/window
+                # Once the user closes the last window, the context tears down:
+                # `pages` may return [] or, once the process is gone, raise. Either
+                # way it means "closed" — treat both as a clean exit, not an error.
+                try:
+                    if not browser.pages:
+                        break  # user closed the last tab/window
+                except Exception:  # noqa: BLE001 - context already gone
+                    break
 
 
 class SessionManager:

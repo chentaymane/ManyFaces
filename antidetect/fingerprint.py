@@ -52,32 +52,67 @@ _SAMPLE_RATES = [44100, 48000]
 _DNT = ["unspecified", "1", "0"]
 _OS_CHOICES = ["windows", "macos", "linux"]
 
-# --- mobile (Android phone) profiles ------------------------------------------
-# Camoufox is a desktop-Gecko build, so a "phone" profile is Firefox-for-Android
+# --- mobile phone profiles -----------------------------------------------------
+# Camoufox is a desktop-Gecko build, so a "phone" profile is mobile-browser
 # emulation: the whole navigator/screen/touch/UA surface is pinned to a real
 # device, which is what mobile fingerprinting keys off. WebGL exposes the phone's
 # GPU vendor/renderer strings (the deep GL parameter set stays desktop-derived —
-# Camoufox only ships a desktop GPU database). Only Android is offered: an iPhone
-# runs WebKit, and presenting an iOS UA over a Gecko engine would be incoherent.
-_MOBILE_OS = {"android"}
+# Camoufox only ships a desktop GPU database).
+#
+# Android is the coherent choice (Firefox-for-Android really is Gecko). iOS is
+# offered too because it's the most-requested device class, but note the caveat:
+# a real iPhone runs Safari/WebKit, while Camoufox runs Gecko. We spoof the whole
+# iOS Safari surface (UA, platform, Apple GPU, iOS fonts, touch), so it passes
+# casual checks, but an engine-level probe can still tell Gecko from WebKit — an
+# iOS profile is inherently weaker than an Android one. It's kept OUT of the
+# "Random" pool for that reason and only used when explicitly selected.
+_MOBILE_OS = {"android", "ios"}
 
-# Real device presets: name, css_w, css_h, dpr, android_ver, gpu_vendor,
+# Real Android device presets: name, css_w, css_h, dpr, android_ver, gpu_vendor,
 # gpu_renderer, cores. Screen sizes are CSS pixels (what screen.width reports).
 _ANDROID_DEVICES = [
     ("Google Pixel 6",     412, 915, 2.625, "14", "ARM",      "Mali-G78",        8),
     ("Google Pixel 7",     412, 915, 2.625, "14", "ARM",      "Mali-G710",       8),
     ("Google Pixel 8",     412, 915, 2.625, "14", "ARM",      "Mali-G715",       9),
+    ("Google Pixel 9",     412, 923, 2.625, "15", "ARM",      "Mali-G715",       8),
     ("Samsung Galaxy S21", 360, 800, 3.0,   "14", "Qualcomm", "Adreno (TM) 660", 8),
     ("Samsung Galaxy S22", 360, 780, 3.0,   "14", "Qualcomm", "Adreno (TM) 730", 8),
     ("Samsung Galaxy S23", 360, 780, 3.0,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+    ("Samsung Galaxy S24", 384, 832, 2.8125,"14", "Qualcomm", "Adreno (TM) 750", 8),
     ("OnePlus 11",         412, 919, 3.5,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+    ("OnePlus 12",         412, 919, 3.5,   "14", "Qualcomm", "Adreno (TM) 750", 8),
     ("Xiaomi 13",          393, 873, 3.0,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+    ("Xiaomi 14",          393, 873, 3.0,   "14", "Qualcomm", "Adreno (TM) 750", 8),
+]
+
+# Real iPhone presets: name, css_w, css_h, dpr, ios_ver (UA "Version/" token uses
+# the dotted form), cores. All modern iPhones render WebGL as "Apple GPU".
+_IOS_DEVICES = [
+    ("iPhone 12",         390, 844, 3.0, "16_7", 6),
+    ("iPhone 13",         390, 844, 3.0, "17_5", 6),
+    ("iPhone 13 Pro",     390, 844, 3.0, "17_5", 6),
+    ("iPhone 14",         390, 844, 3.0, "17_5", 6),
+    ("iPhone 14 Pro",     393, 852, 3.0, "17_6", 6),
+    ("iPhone 15",         393, 852, 3.0, "17_6", 6),
+    ("iPhone 15 Pro",     393, 852, 3.0, "18_1", 6),
+    ("iPhone 15 Pro Max", 430, 932, 3.0, "18_1", 6),
+    ("iPhone SE (2022)",  375, 667, 2.0, "17_5", 6),
 ]
 
 # The limited font set a stock Firefox-for-Android exposes (no desktop fonts).
 _ANDROID_FONTS = [
     "Roboto", "Roboto Condensed", "Roboto Mono", "Noto Sans", "Noto Serif",
     "Noto Sans Mono", "Noto Color Emoji", "Droid Sans", "Droid Sans Mono",
+]
+
+# System fonts an iOS device exposes (no desktop-only fonts leak).
+_IOS_FONTS = [
+    "Helvetica", "Helvetica Neue", "Arial", "Arial Hebrew", "Times New Roman",
+    "Georgia", "Courier", "Courier New", "Verdana", "Trebuchet MS", "Palatino",
+    "Avenir", "Avenir Next", "Baskerville", "Bodoni 72", "Cochin", "Copperplate",
+    "Didot", "Futura", "Gill Sans", "Hoefler Text", "Marker Felt", "Menlo",
+    "Optima", "Papyrus", "Snell Roundhand", "Symbol", "Zapfino",
+    "Apple Color Emoji", "Apple SD Gothic Neo",
 ]
 
 
@@ -316,7 +351,69 @@ def _generate_android(rng) -> Fingerprint:
     )
 
 
+def _generate_ios(rng) -> Fingerprint:
+    """Generate a best-effort iOS-Safari iPhone fingerprint.
+
+    NOTE: Camoufox runs Gecko, not WebKit, so this is a spoof of the visible iOS
+    Safari surface (UA, platform, Apple GPU, iOS fonts, touch), not a real WebKit
+    engine — an engine-level probe can still distinguish it. Use Android for the
+    strongest mobile identity; use this when an iPhone specifically is required.
+    """
+    name, w, h, dpr, iosver, cores = rng.choice(_IOS_DEVICES)
+    lang, region, tz = rng.choice(_LOCALES)
+    dotted = iosver.replace("_", ".")
+    ua = (
+        f"Mozilla/5.0 (iPhone; CPU iPhone OS {iosver} like Mac OS X) "
+        f"AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        f"Version/{dotted} Mobile/15E148 Safari/604.1"
+    )
+
+    charging = rng.random() < 0.35
+    level = round(rng.uniform(0.2, 0.98), 2)
+
+    return Fingerprint(
+        os="ios",
+        is_mobile=True,
+        device_name=name,
+        user_agent=ua,
+        app_version=ua.split("Mozilla/", 1)[-1],  # navigator.appVersion drops the prefix
+        platform="iPhone",
+        # Real iOS Safari has no navigator.oscpu; keep it empty rather than leak a
+        # desktop value. (Camoufox pins whatever we set here.)
+        oscpu="",
+        screen_width=w,
+        screen_height=h,
+        webgl_vendor="Apple Inc.",
+        webgl_renderer="Apple GPU",
+        hardware_concurrency=cores,
+        device_memory=rng.choice([4, 6, 6, 8]),
+        language=lang,
+        region=region,
+        timezone=tz,
+        color_depth=24,
+        device_pixel_ratio=dpr,
+        max_touch_points=5,
+        do_not_track=rng.choice(_DNT),
+        audio_sample_rate=48000,
+        audio_channels=2,
+        canvas_aa_offset=rng.randint(-8, 8),
+        canvas_aa_cap_offset=rng.random() < 0.5,
+        fonts=list(_IOS_FONTS),
+        fonts_spacing_seed=rng.randint(0, 1_000_000),
+        battery_charging=charging,
+        battery_level=level,
+        battery_charging_time=float(rng.choice([0, 900, 1800, 2700])) if charging else 0.0,
+        battery_discharging_time=0.0 if charging else float(rng.choice([3600, 7200, 10800, 14400])),
+        webcams=rng.choice([1, 2, 2]),
+        micros=1,
+        speakers=1,
+        webrtc_local_ipv4=_private_ipv4(rng),
+    )
+
+
 # Weighted pool for "Random": mostly desktop, with a realistic minority of phones.
+# iOS is intentionally excluded — it's the weaker spoof (Gecko under an iOS UA), so
+# it's only ever produced when a user explicitly asks for it, never by the random mix.
 _RANDOM_OS_POOL = ["windows", "windows", "macos", "linux", "android", "android"]
 
 
@@ -330,6 +427,8 @@ def generate(os_name: str | None = None, seed: str | None = None) -> Fingerprint
     rng = random.Random(seed) if seed else random
     if os_name is None:
         os_name = rng.choice(_RANDOM_OS_POOL)
+    if os_name == "ios":
+        return _generate_ios(rng)
     if os_name in _MOBILE_OS:
         return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)

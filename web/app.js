@@ -24,12 +24,13 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-const OS_ICON = { windows: "🪟", macos: "🍎", linux: "🐧", android: "📱" };
+const OS_ICON = { windows: "🪟", macos: "🍎", linux: "🐧", android: "📱", ios: "🍏" };
 
 // ------------------------------------------------------------- render list ---
 function deviceCell(fp) {
   if (fp.is_mobile) {
-    return `<span class="badge device mobile">📱 ${esc(fp.device_name || "Phone")}</span>`;
+    const icon = fp.os === "ios" ? "🍏" : "📱";
+    return `<span class="badge device mobile">${icon} ${esc(fp.device_name || "Phone")}</span>`;
   }
   const label = { windows: "Windows", macos: "macOS", linux: "Linux" }[fp.os] || fp.os;
   return `<span class="badge device">${OS_ICON[fp.os] || "💻"} ${esc(label)}</span>`;

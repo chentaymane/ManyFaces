@@ -64,6 +64,7 @@
               <option value="macos">🍎 macOS</option>
               <option value="linux">🐧 Linux</option>
               <option value="android">📱 Android phone</option>
+              <option value="ios">🍏 iPhone (iOS)</option>
             </select>
           </div>
         </div>
@@ -137,8 +138,10 @@
             <div class="pool-actions">
               <button id="fetch-free" class="ghost sm">⬇ Fetch free proxies</button>
               <button id="test-pool" class="ghost sm">Test all proxies</button>
+              <button id="pick-proxy" class="ghost sm">☑ Choose one to use</button>
               <label class="check inline"><input type="checkbox" id="free-verify" checked /> only keep live ones</label>
             </div>
+            <div class="pool-list hidden-block" id="pool-list"></div>
             <div class="field hint" style="margin-top:8px">Free proxies are public &amp; unreliable — fetch, keep the live ones, and re-test before relying on them.</div>
             <div class="field hint" id="pool-mode-hint" style="margin-top:6px"></div>
           </div>
@@ -188,6 +191,7 @@
               <option value="macos">🍎 macOS</option>
               <option value="linux">🐧 Linux</option>
               <option value="android">📱 Android phone</option>
+              <option value="ios">🍏 iPhone (iOS)</option>
             </select>
           </div>
           <div class="field small">
