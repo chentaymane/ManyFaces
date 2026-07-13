@@ -1,0 +1,38 @@
+# Build artifacts (huge — never commit)
+dist/
+build/
+*.exe
+*.spec.bak
+
+# Bundled browser (per-OS, ~940 MB — never commit)
+browser/
+
+# PyInstaller / packaging outputs
+*.zip
+package.log
+build.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# App data & test scratch
+.antidetect/
+.testdata/
+.bundletest/
+.portabletest/
+.exetest*/
+.healtest/
+.chk/
+webview2/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
