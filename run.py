@@ -47,7 +47,7 @@ def main() -> None:
         threading.Timer(1.5, _open_browser, args=(url,)).start()
 
     print("=" * 56)
-    print("  Anti-Detect Manager is running.")
+    print("  ManyFaces is running.")
     print(f"  Open this in your browser:  http://{config.HOST}:{config.PORT}")
     print("  Keep this window open while using the app. Ctrl+C to stop.")
     print("=" * 56)

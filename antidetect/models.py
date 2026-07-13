@@ -10,6 +10,7 @@ from .fingerprint import Fingerprint, generate as generate_fingerprint
 
 
 ProxyType = Literal["http", "https", "socks5"]
+ProxyMode = Literal["manual", "random", "rotate"]
 
 
 class Proxy(BaseModel):
@@ -90,6 +91,11 @@ class Profile(BaseModel):
     tags: list[str] = Field(default_factory=list)
     start_url: str = "about:blank"
     proxy: Proxy = Field(default_factory=Proxy)
+    # Proxy selection: "manual" uses `proxy`; "random"/"rotate" pick from `proxy_pool`
+    # at launch (random draw, or round-robin advancing `rotation_index`).
+    proxy_mode: ProxyMode = "manual"
+    proxy_pool: list[Proxy] = Field(default_factory=list)
+    rotation_index: int = 0
     fingerprint: FingerprintModel = Field(default_factory=FingerprintModel)
     # Behavioural / hardening toggles handed to Camoufox.
     humanize: bool = True          # human-like cursor movement
@@ -98,6 +104,25 @@ class Profile(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+    def select_proxy(self) -> tuple[Proxy, Optional[int]]:
+        """Resolve the proxy to launch with, plus the next rotation index (or None).
+
+        - manual: the single configured proxy; no index change.
+        - random: a random pool entry; no index change.
+        - rotate: the pool entry at `rotation_index`, and the advanced index to
+          persist so the next launch uses the following proxy.
+        Empty pools fall back to the manual proxy.
+        """
+        import random as _random
+
+        pool = [p for p in self.proxy_pool if p.is_set]
+        if self.proxy_mode == "random" and pool:
+            return _random.choice(pool), None
+        if self.proxy_mode == "rotate" and pool:
+            idx = self.rotation_index % len(pool)
+            return pool[idx], (idx + 1) % len(pool)
+        return self.proxy, None
+
 
 class ProfileCreate(BaseModel):
     name: str
@@ -105,6 +130,8 @@ class ProfileCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     start_url: str = "about:blank"
     proxy: Optional[Proxy] = None
+    proxy_mode: ProxyMode = "manual"
+    proxy_pool: list[Proxy] = Field(default_factory=list)
     os: Optional[str] = None            # constrain generated fingerprint to this OS
     fingerprint: Optional[FingerprintModel] = None  # or supply one fully
     humanize: bool = True
@@ -123,6 +150,8 @@ class ProfileCreate(BaseModel):
             tags=self.tags,
             start_url=self.start_url,
             proxy=self.proxy or Proxy(),
+            proxy_mode=self.proxy_mode,
+            proxy_pool=self.proxy_pool,
             fingerprint=FingerprintModel.from_fingerprint(fp),
             humanize=self.humanize,
             block_webrtc=self.block_webrtc,
@@ -136,6 +165,9 @@ class ProfileUpdate(BaseModel):
     tags: Optional[list[str]] = None
     start_url: Optional[str] = None
     proxy: Optional[Proxy] = None
+    proxy_mode: Optional[ProxyMode] = None
+    proxy_pool: Optional[list[Proxy]] = None
+    rotation_index: Optional[int] = None
     fingerprint: Optional[FingerprintModel] = None
     humanize: Optional[bool] = None
     block_webrtc: Optional[bool] = None

@@ -3,34 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Anti-Detect Browser Manager</title>
+  <title>ManyFaces</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <h1>🐬 Anti-Detect Manager</h1>
+    <div class="brand">
+      <div class="brand-logo">◉</div>
+      <div class="brand-text">
+        <h1>ManyFaces</h1>
+        <span>Anti-detect browser manager</span>
+      </div>
+    </div>
     <div class="header-actions">
-      <span id="engine-note">Engine: Camoufox (patched Firefox)</span>
       <button id="bulk-btn" class="ghost">⚙ Bulk create</button>
       <button id="new-btn" class="primary">+ New Profile</button>
     </div>
   </header>
 
   <main>
-    <table id="profiles">
-      <thead>
-        <tr>
-          <th>Name</th><th>OS</th><th>Proxy</th><th>Locale</th>
-          <th>Cookies</th><th>Status</th><th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="profiles-body">
-        <tr><td colspan="7" class="empty">Loading…</td></tr>
-      </tbody>
-    </table>
+    <div class="toolbar">
+      <span class="count" id="profile-count"></span>
+      <input id="search" class="search" type="text" placeholder="Search profiles…" />
+    </div>
+
+    <div class="table-wrap">
+      <table id="profiles">
+        <thead>
+          <tr>
+            <th>Name</th><th>Device</th><th>Proxy</th>
+            <th class="hide-sm">Locale</th><th class="hide-sm">Cookies</th>
+            <th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="profiles-body">
+          <tr><td colspan="7" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </main>
 
-  <!-- Profile editor modal -->
+  <!-- ------------------------------------------------ Profile editor modal --- -->
   <div id="modal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head">
@@ -38,68 +51,99 @@
         <button id="modal-close" class="icon">✕</button>
       </div>
       <div class="modal-body">
-        <div class="field">
-          <label>Name</label>
-          <input id="f-name" type="text" placeholder="Store account #1" />
-        </div>
         <div class="row">
           <div class="field">
-            <label>Operating system</label>
+            <label>Name</label>
+            <input id="f-name" type="text" placeholder="Store account #1" />
+          </div>
+          <div class="field">
+            <label>Device / operating system</label>
             <select id="f-os">
-              <option value="">Random (desktop)</option>
-              <option value="windows">Windows</option>
-              <option value="macos">macOS</option>
-              <option value="linux">Linux</option>
+              <option value="">Random (mostly desktop)</option>
+              <option value="windows">🪟 Windows</option>
+              <option value="macos">🍎 macOS</option>
+              <option value="linux">🐧 Linux</option>
               <option value="android">📱 Android phone</option>
             </select>
           </div>
-          <div class="field">
-            <label>Start URL</label>
-            <input id="f-url" type="text" value="about:blank" />
-          </div>
+        </div>
+        <div class="field">
+          <label>Start URL</label>
+          <input id="f-url" type="text" value="about:blank" />
         </div>
 
         <fieldset>
           <legend>Proxy</legend>
-          <div class="row">
-            <div class="field small">
-              <label>Type</label>
-              <select id="f-ptype">
-                <option value="http">HTTP</option>
-                <option value="https">HTTPS</option>
-                <option value="socks5">SOCKS5</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Host</label>
-              <input id="f-phost" type="text" placeholder="1.2.3.4" />
-            </div>
-            <div class="field small">
-              <label>Port</label>
-              <input id="f-pport" type="number" placeholder="8080" />
-            </div>
+          <div class="segmented" id="proxy-mode">
+            <button type="button" data-mode="manual" class="active">Manual</button>
+            <button type="button" data-mode="random">Random</button>
+            <button type="button" data-mode="rotate">Rotate</button>
           </div>
-          <div class="row">
-            <div class="field">
-              <label>Username</label>
-              <input id="f-puser" type="text" />
+
+          <!-- Manual: single proxy -->
+          <div id="proxy-manual">
+            <div class="row">
+              <div class="field small">
+                <label>Type</label>
+                <select id="f-ptype">
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                  <option value="socks5">SOCKS5</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Host</label>
+                <input id="f-phost" type="text" placeholder="1.2.3.4" />
+              </div>
+              <div class="field small">
+                <label>Port</label>
+                <input id="f-pport" type="number" placeholder="8080" />
+              </div>
             </div>
-            <div class="field">
-              <label>Password</label>
-              <input id="f-ppass" type="password" />
+            <div class="row">
+              <div class="field">
+                <label>Username</label>
+                <input id="f-puser" type="text" />
+              </div>
+              <div class="field">
+                <label>Password</label>
+                <input id="f-ppass" type="password" />
+              </div>
+              <div class="field btn-field">
+                <label>&nbsp;</label>
+                <button id="test-proxy" class="ghost">Test</button>
+              </div>
             </div>
-            <div class="field btn-field">
-              <button id="test-proxy" class="ghost">Test</button>
-            </div>
+            <div id="proxy-result" class="proxy-result"></div>
           </div>
-          <div id="proxy-result" class="proxy-result"></div>
+
+          <!-- Random / Rotate: proxy pool -->
+          <div id="proxy-pool-box" class="hidden-block">
+            <div class="row">
+              <div class="field small">
+                <label>Default type</label>
+                <select id="f-pool-type">
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                  <option value="socks5">SOCKS5</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Proxy list <span class="hint">— one per line</span></label>
+                <textarea id="f-pool" placeholder="1.2.3.4:8080&#10;socks5://5.6.7.8:1080&#10;host:port:user:pass&#10;http://user:pass@host:port"></textarea>
+              </div>
+            </div>
+            <div class="pool-summary" id="pool-summary"></div>
+            <button id="test-pool" class="ghost sm">Test all proxies</button>
+            <div class="field hint" id="pool-mode-hint" style="margin-top:10px"></div>
+          </div>
         </fieldset>
 
         <fieldset>
           <legend>Hardening</legend>
-          <label class="check"><input type="checkbox" id="f-humanize" checked /> Humanize cursor</label>
-          <label class="check"><input type="checkbox" id="f-webrtc" checked /> Block WebRTC leaks</label>
-          <label class="check"><input type="checkbox" id="f-geoip" checked /> Match locale to proxy (GeoIP)</label>
+          <label class="check"><input type="checkbox" id="f-humanize" checked /> Humanize cursor movement</label>
+          <label class="check"><input type="checkbox" id="f-webrtc" checked /> Block WebRTC IP leaks</label>
+          <label class="check"><input type="checkbox" id="f-geoip" checked /> Match locale &amp; timezone to proxy (GeoIP)</label>
         </fieldset>
 
         <div id="fp-preview" class="fp-preview"></div>
@@ -107,6 +151,70 @@
       <div class="modal-foot">
         <button id="modal-cancel" class="ghost">Cancel</button>
         <button id="modal-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------- Bulk create modal ---- -->
+  <div id="bulk-modal" class="modal hidden">
+    <div class="modal-card sm">
+      <div class="modal-head">
+        <h2>Bulk create profiles</h2>
+        <button id="bulk-close" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="field hint" style="margin-top:0">Each profile gets a fully-randomized, coherent fingerprint and a fresh cookie jar.</p>
+        <div class="row">
+          <div class="field small">
+            <label>How many</label>
+            <input id="bulk-count" type="number" value="10" min="1" max="200" />
+          </div>
+          <div class="field">
+            <label>Name prefix</label>
+            <input id="bulk-prefix" type="text" value="Profile" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Device / OS</label>
+            <select id="bulk-os">
+              <option value="">Random mix (incl. Android)</option>
+              <option value="windows">🪟 Windows</option>
+              <option value="macos">🍎 macOS</option>
+              <option value="linux">🐧 Linux</option>
+              <option value="android">📱 Android phone</option>
+            </select>
+          </div>
+          <div class="field small">
+            <label>Cookies each</label>
+            <input id="bulk-cookies" type="number" value="15" min="0" max="200" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="bulk-cancel" class="ghost">Cancel</button>
+        <button id="bulk-create" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ----------------------------------------------------- Cookies modal ---- -->
+  <div id="cookie-modal" class="modal hidden">
+    <div class="modal-card sm">
+      <div class="modal-head">
+        <h2>Cookies</h2>
+        <button id="cookie-close" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="field hint" id="cookie-info" style="margin-top:0"></p>
+        <div class="field">
+          <label>Add random test cookies</label>
+          <input id="cookie-count" type="number" value="10" min="1" max="200" />
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="cookie-clear" class="ghost danger">Clear all</button>
+        <button id="cookie-add" class="primary">Add cookies</button>
       </div>
     </div>
   </div>

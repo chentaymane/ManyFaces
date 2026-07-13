@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -21,9 +21,10 @@ from .models import (
     ProfileCreate,
     ProfileUpdate,
     Proxy,
+    ProxyType,
 )
 
-app = FastAPI(title="Anti-Detect Browser Manager", version="0.1.0")
+app = FastAPI(title="ManyFaces", version="0.1.0")
 
 
 @app.on_event("startup")
@@ -415,11 +416,19 @@ def start_profile(profile_id: str) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
+    # Resolve the effective proxy for this launch (random draw / rotate advance).
+    eff_proxy, next_index = profile.select_proxy()
+    profile.proxy = eff_proxy  # in-memory: what this session launches with
+    if next_index is not None:  # persist rotation so the next launch advances
+        db.update(profile_id, ProfileUpdate(rotation_index=next_index))
     try:
         manager.start(profile)
     except BrowserError as exc:
         raise HTTPException(502, str(exc))
-    return {"running": manager.is_running(profile_id)}
+    return {
+        "running": manager.is_running(profile_id),
+        "proxy": f"{eff_proxy.type}://{eff_proxy.host}:{eff_proxy.port}" if eff_proxy.is_set else None,
+    }
 
 
 @app.post("/api/profiles/{profile_id}/stop")
@@ -438,6 +447,29 @@ def running() -> dict[str, list[str]]:
 @app.post("/api/proxy/test")
 async def test_proxy(proxy: Proxy) -> dict[str, Any]:
     return await proxy_mod.test(proxy)
+
+
+class ProxyPoolPayload(BaseModel):
+    text: str = ""                 # pasted list, one proxy per line
+    default_type: ProxyType = "http"
+
+
+@app.post("/api/proxy/parse")
+def parse_proxy_pool(payload: ProxyPoolPayload) -> dict[str, Any]:
+    """Parse pasted proxy text into structured entries (no network calls)."""
+    proxies = proxy_mod.parse_list(payload.text, payload.default_type)
+    return {"count": len(proxies), "proxies": [p.model_dump() for p in proxies]}
+
+
+@app.post("/api/proxy/test-pool")
+async def test_proxy_pool(payload: ProxyPoolPayload) -> dict[str, Any]:
+    """Parse a pasted list and test every proxy concurrently (like chameleon)."""
+    proxies = proxy_mod.parse_list(payload.text, payload.default_type)
+    if not proxies:
+        return {"count": 0, "alive": 0, "results": []}
+    results = await proxy_mod.test_many(proxies)
+    alive = sum(1 for r in results if r.get("ok"))
+    return {"count": len(proxies), "alive": alive, "results": results}
 
 
 # -------------------------------------------------------------- fingerprint ---
@@ -553,10 +585,8 @@ _ASSET_VERSION = str(int(_time_mod.time()))
 if config.WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(config.WEB_DIR)), name="static")
 
-    @app.get("/")
-    def index() -> "Response":  # noqa: F821
-        from fastapi.responses import HTMLResponse
-
+    @app.get("/", response_class=HTMLResponse)
+    def index():
         html = (config.WEB_DIR / "index.html").read_text(encoding="utf-8")
         # Version the asset URLs so each server start busts any cached JS/CSS.
         html = html.replace("/static/app.js", f"/static/app.js?v={_ASSET_VERSION}")

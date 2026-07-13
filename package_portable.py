@@ -1,9 +1,9 @@
 """Assemble the portable, no-download distribution.
 
-Produces `dist/AntiDetectManager-Portable/` (the app exe + the Camoufox browser side
-by side) and zips it to `dist/AntiDetectManager-Portable.zip`. The app finds the
-`browser/` folder next to the exe and runs it directly — so the end user never
-downloads anything; they just unzip and double-click.
+Produces `dist/ManyFaces-Portable/` (the app exe + the Camoufox browser side by
+side) and zips it to `dist/ManyFaces-Portable.zip`. The app finds the `browser/`
+folder next to the exe and runs it directly — so the end user never downloads
+anything; they just unzip and double-click.
 """
 from __future__ import annotations
 
@@ -16,20 +16,20 @@ from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent
 DIST = PROJ / "dist"
-EXE = DIST / "AntiDetectManager.exe"
-OUT = DIST / "AntiDetectManager-Portable"
-ZIP = DIST / "AntiDetectManager-Portable.zip"
+EXE = DIST / "ManyFaces.exe"
+OUT = DIST / "ManyFaces-Portable"
+ZIP = DIST / "ManyFaces-Portable.zip"
 
-START_TXT = """Anti-Detect Browser Manager - Portable
-=======================================
+START_TXT = """ManyFaces - Portable
+====================
 
 HOW TO USE
-  1. Double-click  AntiDetectManager.exe
+  1. Double-click  ManyFaces.exe
   2. That's it. The browser engine is already included in the "browser" folder,
      so there is NO download and it works fully offline.
 
 NOTES
-  * Keep AntiDetectManager.exe and the "browser" folder together in this folder.
+  * Keep ManyFaces.exe and the "browser" folder together in this folder.
   * Windows SmartScreen may warn on first launch (unsigned app):
     click "More info" -> "Run anyway".
   * Your profiles and data are stored in:  %USERPROFILE%\\.antidetect
@@ -58,7 +58,7 @@ def main() -> None:
     OUT.mkdir(parents=True)
 
     log("copying app exe...")
-    shutil.copy2(str(EXE), str(OUT / "AntiDetectManager.exe"))
+    shutil.copy2(str(EXE), str(OUT / "ManyFaces.exe"))
 
     log("copying browser engine (~940 MB, one-time)...")
     t0 = time.time()
@@ -76,7 +76,7 @@ def main() -> None:
         for root, _, files in os.walk(str(OUT)):
             for f in files:
                 full = Path(root) / f
-                zf.write(str(full), str(Path("AntiDetectManager-Portable") / full.relative_to(OUT)))
+                zf.write(str(full), str(Path("ManyFaces-Portable") / full.relative_to(OUT)))
     size_mb = ZIP.stat().st_size / 1048576
     log(f"zip done in {time.time() - t0:.0f}s -> {ZIP.name} ({size_mb:.0f} MB)")
     log("PORTABLE PACKAGE READY")

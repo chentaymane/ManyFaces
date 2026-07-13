@@ -1,4 +1,4 @@
-"""Anti-detect browser manager.
+"""ManyFaces — anti-detect browser manager.
 
 A multi-profile browser management tool built on Camoufox (patched Firefox with
 native-level fingerprint spoofing). Each profile is fully isolated: its own

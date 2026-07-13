@@ -90,7 +90,7 @@ def main() -> None:
     if not _wait_for_port(config.HOST, config.PORT):
         print(f"Server failed to start on {config.HOST}:{config.PORT}", file=sys.stderr)
         return
-    print(f"Anti-Detect Manager running at http://{config.HOST}:{config.PORT}", flush=True)
+    print(f"ManyFaces running at http://{config.HOST}:{config.PORT}", flush=True)
 
     import webview  # imported here so `--help`/import errors are clearer
 
@@ -99,7 +99,7 @@ def main() -> None:
     # browser finished downloading).
     url = f"http://{config.HOST}:{config.PORT}/?v={int(time.time())}"
     webview.create_window(
-        "Anti-Detect Browser Manager",
+        "ManyFaces",
         url,
         width=1280,
         height=860,

@@ -1,4 +1,4 @@
-# PyInstaller spec — builds a single-file AntiDetectManager.exe.
+# PyInstaller spec — builds a single-file ManyFaces.exe.
 #
 # The Camoufox *browser binary* (~150 MB) is NOT bundled; it downloads to the user
 # cache on first run (see the engine-setup overlay). We DO bundle the Camoufox and
@@ -80,7 +80,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="AntiDetectManager",
+    name="ManyFaces",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

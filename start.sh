@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Anti-Detect Manager launcher for Linux / macOS.
+# ManyFaces launcher for Linux / macOS.
 # Starts the server and opens the dashboard in your default browser.
 #
 #   chmod +x start.sh   # once
@@ -19,7 +19,7 @@ else
 fi
 
 echo "============================================================"
-echo "  Anti-Detect Manager"
+echo "  ManyFaces"
 echo "  Starting... your browser will open automatically."
 echo "  Keep this terminal open while using the app (Ctrl+C stops)."
 echo "============================================================"

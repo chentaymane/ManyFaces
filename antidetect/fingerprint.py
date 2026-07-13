@@ -316,9 +316,20 @@ def _generate_android(rng) -> Fingerprint:
     )
 
 
+# Weighted pool for "Random": mostly desktop, with a realistic minority of phones.
+_RANDOM_OS_POOL = ["windows", "windows", "macos", "linux", "android", "android"]
+
+
 def generate(os_name: str | None = None, seed: str | None = None) -> Fingerprint:
-    """Generate a fresh, internally-coherent, deeply-randomized fingerprint."""
+    """Generate a fresh, internally-coherent, deeply-randomized fingerprint.
+
+    With no `os_name`, one is drawn from `_RANDOM_OS_POOL`, which now includes
+    Android — so bulk/random creation yields a natural mix of desktop and phone
+    profiles.
+    """
     rng = random.Random(seed) if seed else random
+    if os_name is None:
+        os_name = rng.choice(_RANDOM_OS_POOL)
     if os_name in _MOBILE_OS:
         return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)

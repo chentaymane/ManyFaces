@@ -1,4 +1,4 @@
-# Anti-Detect Browser Manager
+# ManyFaces
 
 A multi-profile anti-detect browser manager — the open, self-hosted equivalent of
 Dolphin Anty / Multilogin / GoLogin. Each profile is a fully isolated browser
@@ -48,6 +48,13 @@ Those uses are illegal in many jurisdictions and are not supported.
     GPU/screen/CPU/DPR/audio/locale every launch.
 - **Proxy management** — HTTP / HTTPS / SOCKS5 per profile, one-click live test
   (exit IP, geo, latency), and GeoIP locale/timezone-matching to the proxy's country.
+- **Proxy pool & rotation** — paste a list of proxies (any common format:
+  `host:port`, `proto://host:port`, `host:port:user:pass`, `proto://user:pass@host:port`)
+  and pick a mode per profile: **manual** (one fixed proxy), **random** (a fresh pool
+  pick each launch), or **rotate** (round-robin through the pool, advancing every
+  launch). Test the whole pool at once — each proxy is verified concurrently for exit
+  IP, country and latency. Inspired by
+  [chameleon-ip-rotator](https://github.com/chentaymane/chameleon-ip-rotator).
 - **Cookie management** — import/export (Playwright JSON format) plus realistic
   random cookie generation (proper GA/Facebook/DoubleClick formats across real
   tracker domains) to warm up a profile's jar and verify isolation.
@@ -97,11 +104,11 @@ together**, so the end user never downloads anything — they unzip and double-c
 pip install pyinstaller
 pyinstaller build.spec --noconfirm    # build the app exe
 python -m camoufox fetch              # ensure the browser is installed locally
-python package_portable.py            # bundle exe + browser -> dist/AntiDetectManager-Portable.zip
+python package_portable.py            # bundle exe + browser -> dist/ManyFaces-Portable.zip
 ```
 
-This produces `dist/AntiDetectManager-Portable.zip`. The end user just unzips it and
-runs the app (`AntiDetectManager.exe` on Windows, `AntiDetectManager` on Linux); it
+This produces `dist/ManyFaces-Portable.zip`. The end user just unzips it and
+runs the app (`ManyFaces.exe` on Windows, `ManyFaces` on Linux); it
 finds the bundled `browser/` folder next to it and launches instantly — **no 500 MB
 download, no GitHub dependency, fully offline.** This sidesteps slow/flaky GitHub
 access entirely.
@@ -121,7 +128,7 @@ pip install pyinstaller
 pyinstaller build.spec --noconfirm
 ```
 
-The result is `dist/AntiDetectManager.exe` (~160 MB). Just launch it — it opens the
+The result is `dist/ManyFaces.exe` (~160 MB). Just launch it — it opens the
 native window and, on first run, downloads the Camoufox browser (~500 MB) into the
 user cache with an in-app progress screen (live %, MB, speed, and ETA).
 

@@ -1,8 +1,8 @@
 @echo off
-title Anti-Detect Manager
+title ManyFaces
 cd /d "%~dp0"
 echo ============================================================
-echo   Anti-Detect Manager
+echo   ManyFaces
 echo ============================================================
 echo   Starting... your browser will open automatically.
 echo   Keep THIS window open while using the app.
