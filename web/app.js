@@ -331,10 +331,70 @@ $("#fetch-free").addEventListener("click", async () => {
   }
 });
 
-// re-count pool as you type
+// re-count pool as you type; hide any open picker (it's now stale)
 $("#f-pool").addEventListener("input", () => {
   const n = $("#f-pool").value.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).length;
   $("#pool-summary").innerHTML = n ? `<span class="chip">${n} line${n === 1 ? "" : "s"}</span>` : "";
+  $("#pool-list").classList.add("hidden-block");
+});
+
+// "Choose one to use": test the pool, list each proxy live-status first, and let the
+// user drop a single working one into the Manual proxy slot. Parse + test share the
+// same parser (server-side), so their results line up by index.
+let pickedPool = [];  // structured proxies, index-aligned with the picker rows
+$("#pick-proxy").addEventListener("click", async () => {
+  const text = $("#f-pool").value;
+  const box = $("#pool-list");
+  box.classList.remove("hidden-block");
+  if (!text.trim()) { box.innerHTML = `<div class="pool-item empty">No proxies entered — paste or fetch some first.</div>`; return; }
+  box.innerHTML = `<div class="pool-item empty">Testing every proxy…</div>`;
+  const btn = $("#pick-proxy");
+  btn.disabled = true;
+  try {
+    const body = JSON.stringify({ text, default_type: $("#f-pool-type").value });
+    const [parsed, tested] = await Promise.all([
+      api("/api/proxy/parse", { method: "POST", body }),
+      api("/api/proxy/test-pool", { method: "POST", body }),
+    ]);
+    pickedPool = parsed.proxies || [];
+    const byIndex = new Map((tested.results || []).map((r) => [r.index, r]));
+    if (!pickedPool.length) { box.innerHTML = `<div class="pool-item empty">Nothing parsed from that list.</div>`; return; }
+    // Alive proxies first, then fastest; dead ones sink to the bottom.
+    const order = pickedPool.map((_, i) => i).sort((a, b) => {
+      const ra = byIndex.get(a) || {}, rb = byIndex.get(b) || {};
+      if (!!rb.ok !== !!ra.ok) return rb.ok ? 1 : -1;
+      return (ra.latency_ms ?? 1e9) - (rb.latency_ms ?? 1e9);
+    });
+    box.innerHTML = order.map((i) => {
+      const p = pickedPool[i], r = byIndex.get(i) || {};
+      const status = r.ok
+        ? `<span class="ps ok">✓ ${esc(r.ip || "")} · ${esc([r.city, r.country].filter(Boolean).join(" "))} · ${r.latency_ms} ms</span>`
+        : `<span class="ps bad">✗ ${esc(r.error || "no response")}</span>`;
+      return `<button class="pool-item" data-index="${i}" ${r.ok ? "" : 'data-dead="1"'}>` +
+        `<span class="mono">${esc(proxyToLine(p))}</span>${status}</button>`;
+    }).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="pool-item empty">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Pick a proxy from the list → load it into the Manual slot and switch to Manual mode.
+$("#pool-list").addEventListener("click", (e) => {
+  const row = e.target.closest("button.pool-item[data-index]");
+  if (!row) return;
+  const p = pickedPool[parseInt(row.dataset.index, 10)];
+  if (!p) return;
+  $("#f-ptype").value = p.type || "http";
+  $("#f-phost").value = p.host || "";
+  $("#f-pport").value = p.port || "";
+  $("#f-puser").value = p.username || "";
+  $("#f-ppass").value = p.password || "";
+  $("#pool-list").classList.add("hidden-block");
+  setProxyMode("manual");
+  $("#proxy-result").className = "proxy-result"; $("#proxy-result").textContent = "Loaded into the Manual proxy — test it before saving.";
+  toast("Proxy loaded into Manual");
 });
 
 // -------------------------------------------------------------- bulk create ---
