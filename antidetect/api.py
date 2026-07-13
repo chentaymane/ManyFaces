@@ -472,6 +472,38 @@ async def test_proxy_pool(payload: ProxyPoolPayload) -> dict[str, Any]:
     return {"count": len(proxies), "alive": alive, "results": results}
 
 
+class FreeProxyRequest(BaseModel):
+    protocol: str = "http"   # "http" (also https) or "socks5"
+    limit: int = 100
+    verify: bool = False     # test each and return only the working ones
+
+
+@app.post("/api/proxy/fetch-free")
+async def fetch_free_proxies(req: FreeProxyRequest) -> dict[str, Any]:
+    """Pull a pool of free proxies from public sources, optionally keeping only live ones.
+
+    Free proxies are unreliable by nature — enable `verify` (the UI's default) to
+    return only the ones that currently pass a live exit-IP check.
+    """
+    ptype = "socks5" if req.protocol.startswith("socks") else "http"
+    # When verifying, cast a wider net (most free proxies are dead) but test them
+    # fast — short per-proxy timeout, high concurrency — so the request returns in
+    # ~10-15s instead of minutes, which is what was showing up as "Failed to fetch".
+    want = max(1, min(req.limit, 500))
+    fetch_n = min(120, want * 3) if req.verify else want
+    hostports = await proxy_mod.fetch_free(ptype, fetch_n)
+    lines = [f"{ptype}://{hp}" for hp in hostports]
+
+    if not req.verify or not lines:
+        return {"count": len(lines), "alive": None, "proxies": lines[:want], "protocol": ptype}
+
+    proxies = proxy_mod.parse_list("\n".join(lines), ptype)
+    results = await proxy_mod.test_many(proxies, concurrency=120, timeout=4.0)
+    live = [f"{ptype}://{proxies[r['index']].host}:{proxies[r['index']].port}"
+            for r in results if r.get("ok")][:want]
+    return {"count": len(proxies), "alive": len(live), "proxies": live, "protocol": ptype}
+
+
 # -------------------------------------------------------------- fingerprint ---
 
 @app.get("/api/fingerprint/generate")

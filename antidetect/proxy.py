@@ -80,7 +80,7 @@ def parse_list(text: str, default_type: str = "http") -> list[Proxy]:
     return out
 
 
-async def test(proxy: Proxy) -> dict[str, Any]:
+async def test(proxy: Proxy, timeout: float = _TIMEOUT) -> dict[str, Any]:
     if not proxy.is_set:
         return {"ok": False, "error": "Proxy host/port not set"}
 
@@ -91,7 +91,7 @@ async def test(proxy: Proxy) -> dict[str, Any]:
 
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout) as client:
             resp = await client.get(_ECHO_URL)
             resp.raise_for_status()
             info = resp.json()
@@ -109,17 +109,81 @@ async def test(proxy: Proxy) -> dict[str, Any]:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-async def test_many(proxies: list[Proxy], concurrency: int = 16) -> list[dict[str, Any]]:
+# Public, free proxy lists (plain `host:port` per line) by protocol. These are
+# community-maintained and best-effort — most free proxies are slow or dead, so the
+# UI pairs "Fetch free" with "Test all" to keep only the ones that actually work.
+_FREE_SOURCES = {
+    "http": [
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000",
+    ],
+    "socks5": [
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000",
+    ],
+}
+_HOSTPORT_RE = None  # lazily compiled below
+
+
+async def fetch_free(protocol: str = "http", limit: int = 100) -> list[str]:
+    """Fetch a de-duplicated pool of free `host:port` proxies from public sources.
+
+    `protocol` is "http" (also used for https) or "socks5". Returns plain
+    `host:port` lines (no protocol prefix) — the caller labels them with the chosen
+    type. Best-effort: sources that fail or time out are skipped; the rest are merged.
+    """
+    global _HOSTPORT_RE
+    if _HOSTPORT_RE is None:
+        import re
+        _HOSTPORT_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})$")
+
+    key = "socks5" if str(protocol).startswith("socks") else "http"
+    seen: set[str] = set()
+    out: list[str] = []
+
+    async def _grab(client: httpx.AsyncClient, url: str) -> list[str]:
+        try:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.text.splitlines()
+        except Exception:  # noqa: BLE001 - a dead source shouldn't fail the whole fetch
+            return []
+
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        results = await asyncio.gather(*(_grab(client, u) for u in _FREE_SOURCES[key]))
+
+    for lines in results:
+        for raw in lines:
+            m = _HOSTPORT_RE.match(raw.strip())
+            if not m:
+                continue
+            hp = m.group(0)
+            if hp in seen:
+                continue
+            seen.add(hp)
+            out.append(hp)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+async def test_many(
+    proxies: list[Proxy], concurrency: int = 24, timeout: float = 8.0
+) -> list[dict[str, Any]]:
     """Test a whole pool concurrently, preserving input order in the results.
 
     Each result carries the proxy's server URL and index so the UI can line the
-    verdicts up against the pasted list (like chameleon's verification pass).
+    verdicts up against the pasted list (like chameleon's verification pass). A short
+    per-proxy `timeout` and high `concurrency` keep big free-proxy lists (mostly dead)
+    from taking minutes — the whole sweep stays within a handful of `timeout` windows.
     """
     sem = asyncio.Semaphore(max(1, concurrency))
 
     async def _one(idx: int, px: Proxy) -> dict[str, Any]:
         async with sem:
-            res = await test(px)
+            res = await test(px, timeout=timeout)
         res["index"] = idx
         res["server"] = f"{px.type}://{px.host}:{px.port}"
         return res

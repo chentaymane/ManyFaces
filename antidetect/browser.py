@@ -82,6 +82,38 @@ def _resolve_screen(os_name: str, width: int, height: int):
     return None
 
 
+def _apply_mobile_webgl(cfg: dict[str, Any], vendor: str, renderer: str) -> None:
+    """Make a mobile profile's WebGL report the phone GPU, masked AND unmasked.
+
+    Camoufox ships only a desktop GPU database, so we take a base bundle and rewrite
+    every place the vendor/renderer surface: the top-level strings and the UNMASKED
+    vendor/renderer parameters (GL enums 37445/37446) inside both the WebGL1 and
+    WebGL2 parameter maps — which is what fingerprinters actually read via
+    WEBGL_debug_renderer_info. The remaining GL params/extensions stay desktop-derived
+    (no mobile GPU data exists to source them from). We inject the whole bundle into
+    `cfg`, so Camoufox's own (desktop) sample never overwrites it.
+    """
+    try:
+        from camoufox.webgl import sample_webgl
+    except Exception:  # noqa: BLE001 - engine missing; skip, launch will report it
+        return
+    try:
+        bundle = sample_webgl("lin")
+    except Exception:  # noqa: BLE001
+        return
+    bundle.pop("webGl2Enabled", None)  # a control flag, not a config property
+    for pkey in ("webGl:parameters", "webGl2:parameters"):
+        params = bundle.get(pkey)
+        if isinstance(params, dict):
+            if "37445" in params:
+                params["37445"] = vendor    # UNMASKED_VENDOR_WEBGL
+            if "37446" in params:
+                params["37446"] = renderer  # UNMASKED_RENDERER_WEBGL
+    bundle["webGl:vendor"] = vendor
+    bundle["webGl:renderer"] = renderer
+    cfg.update(bundle)
+
+
 def build_launch_options(profile: Profile, headless: bool | None = None) -> dict[str, Any]:
     """Build a single, pre-validated set of Camoufox launch options for a profile."""
     fp = profile.fingerprint.to_fingerprint()
@@ -102,6 +134,13 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
     opts: dict[str, Any] = {
         "headless": False if headless is None else headless,
         "persistent_context": True,
+        # Don't let Playwright enforce its own viewport. Newer Playwright sends a
+        # `setDefaultViewport` with an `isMobile` field that the pinned Camoufox
+        # Firefox build's Juggler protocol rejects ("property isMobile ... not in
+        # this scheme"), which otherwise breaks EVERY launch. We pin screen/window
+        # dimensions ourselves (via config + the `window` option), so Playwright's
+        # viewport is redundant anyway.
+        "no_viewport": True,
         "user_data_dir": str(config.profile_data_dir(profile.id)),
         # Camoufox only accepts desktop OS names; an Android profile runs on the
         # Linux engine with its identity spoofed to a phone via `config`.
@@ -123,10 +162,27 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         # (custom_fonts_only stops Camoufox merging the desktop font set, which
         # would otherwise leak a desktop identity). Screen dims are pinned in
         # `cfg`, so no BrowserForge Screen constraint is used here.
+        _apply_mobile_webgl(cfg, fp.webgl_vendor, fp.webgl_renderer)
         opts["window"] = (fp.screen_width, fp.screen_height)
         if fp.fonts:
             opts["fonts"] = fp.fonts
             opts["custom_fonts_only"] = True
+        # Make it behave like a real phone, not just a narrow desktop window:
+        # enable native touch events (so `ontouchstart`, `TouchEvent`,
+        # `pointer: coarse` and `hover: none` all report like a touchscreen) and
+        # honour the meta-viewport tag so pages render their true mobile layout.
+        # Without these a phone UA still gets served/rendered as desktop.
+        opts["firefox_user_prefs"] = {
+            "dom.w3c_touch_events.enabled": 1,
+            "dom.w3c_touch_events.legacy_apis.enabled": True,
+            "dom.meta-viewport.enabled": True,
+            "apz.allow_zooming": True,
+            # Report a touchscreen's pointer to CSS: primary/all pointer = coarse
+            # (bit 0x01), no hover. This flips `pointer: coarse` / `hover: none` /
+            # `any-hover: none` true — the media queries mobile sites switch on.
+            "ui.primaryPointerCapabilities": 1,
+            "ui.allPointerCapabilities": 1,
+        }
     else:
         screen = _resolve_screen(fp.os, fp.screen_width, fp.screen_height)
         if screen is not None:

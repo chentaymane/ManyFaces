@@ -134,8 +134,13 @@
               </div>
             </div>
             <div class="pool-summary" id="pool-summary"></div>
-            <button id="test-pool" class="ghost sm">Test all proxies</button>
-            <div class="field hint" id="pool-mode-hint" style="margin-top:10px"></div>
+            <div class="pool-actions">
+              <button id="fetch-free" class="ghost sm">⬇ Fetch free proxies</button>
+              <button id="test-pool" class="ghost sm">Test all proxies</button>
+              <label class="check inline"><input type="checkbox" id="free-verify" checked /> only keep live ones</label>
+            </div>
+            <div class="field hint" style="margin-top:8px">Free proxies are public &amp; unreliable — fetch, keep the live ones, and re-test before relying on them.</div>
+            <div class="field hint" id="pool-mode-hint" style="margin-top:6px"></div>
           </div>
         </fieldset>
 

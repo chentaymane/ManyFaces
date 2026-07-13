@@ -299,6 +299,37 @@ $("#test-pool").addEventListener("click", async () => {
   } catch (e) { sum.innerHTML = `<span class="chip bad">${esc(e.message)}</span>`; }
 });
 
+// fetch free proxies from public sources into the textarea
+$("#fetch-free").addEventListener("click", async () => {
+  const btn = $("#fetch-free");
+  const sum = $("#pool-summary");
+  const verify = $("#free-verify").checked;
+  const protocol = $("#f-pool-type").value === "socks5" ? "socks5" : "http";
+  btn.disabled = true; btn.textContent = verify ? "Fetching + testing…" : "Fetching…";
+  sum.innerHTML = `<span class="chip">Contacting free-proxy sources…</span>`;
+  try {
+    const r = await api("/api/proxy/fetch-free", {
+      method: "POST", body: JSON.stringify({ protocol, limit: 50, verify }),
+    });
+    if (!r.proxies.length) {
+      sum.innerHTML = `<span class="chip bad">No proxies returned — try again or paste your own</span>`;
+    } else {
+      const existing = $("#f-pool").value.trim();
+      $("#f-pool").value = (existing ? existing + "\n" : "") + r.proxies.join("\n");
+      $("#f-pool").dispatchEvent(new Event("input"));
+      sum.innerHTML = verify
+        ? `<span class="chip ok">✓ added ${r.alive} live proxies</span>`
+        : `<span class="chip">added ${r.count} proxies (untested)</span>`;
+      // default the pool type select to match what we fetched
+      $("#f-pool-type").value = r.protocol;
+    }
+  } catch (e) {
+    sum.innerHTML = `<span class="chip bad">${esc(e.message)}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "⬇ Fetch free proxies";
+  }
+});
+
 // re-count pool as you type
 $("#f-pool").addEventListener("input", () => {
   const n = $("#f-pool").value.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).length;
