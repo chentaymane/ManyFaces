@@ -143,7 +143,8 @@ function renderFpPreview(fp) {
   if (!fp) { box.textContent = "A coherent, deeply-randomized fingerprint is generated on save."; return; }
   box.textContent =
     `Fingerprint (pinned natively by Camoufox, identical every launch)\n` +
-    `  OS:        ${fp.os}\n` +
+    `  OS:        ${fp.os}${fp.is_mobile ? " · 📱 " + (fp.device_name || "phone") : ""}\n` +
+    (fp.is_mobile ? `  UA:        ${fp.user_agent}\n` : "") +
     `  Screen:    ${fp.screen_width}×${fp.screen_height} · ${fp.color_depth}-bit · DPR ${fp.device_pixel_ratio}\n` +
     `  GPU:       ${fp.webgl_renderer}\n` +
     `  CPU/RAM:   ${fp.hardware_concurrency} cores · ${fp.device_memory} GB\n` +
@@ -172,7 +173,7 @@ $("#bulk-btn").addEventListener("click", async () => {
   if (n === null) return;
   const count = parseInt(n, 10);
   if (isNaN(count) || count < 1) return toast("Enter a positive number", "err");
-  const osChoice = prompt("OS for these profiles? (windows / macos / linux, or blank for random per profile)", "");
+  const osChoice = prompt("OS for these profiles? (windows / macos / linux / android, or blank for random desktop per profile)", "");
   try {
     toast(`Creating ${count} profiles…`);
     const r = await api("/api/profiles/bulk", {

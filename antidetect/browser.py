@@ -103,7 +103,9 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         "headless": False if headless is None else headless,
         "persistent_context": True,
         "user_data_dir": str(config.profile_data_dir(profile.id)),
-        "os": fp.os,
+        # Camoufox only accepts desktop OS names; an Android profile runs on the
+        # Linux engine with its identity spoofed to a phone via `config`.
+        "os": "linux" if fp.is_mobile else fp.os,
         "locale": fp.locale,
         "humanize": profile.humanize,
         "block_webrtc": profile.block_webrtc,
@@ -116,9 +118,19 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
     webgl = fp.webgl_config()
     if webgl is not None:
         opts["webgl_config"] = webgl  # pins GPU consistently across launches
-    screen = _resolve_screen(fp.os, fp.screen_width, fp.screen_height)
-    if screen is not None:
-        opts["screen"] = screen
+    if fp.is_mobile:
+        # Size the real window to the phone and expose ONLY Android fonts
+        # (custom_fonts_only stops Camoufox merging the desktop font set, which
+        # would otherwise leak a desktop identity). Screen dims are pinned in
+        # `cfg`, so no BrowserForge Screen constraint is used here.
+        opts["window"] = (fp.screen_width, fp.screen_height)
+        if fp.fonts:
+            opts["fonts"] = fp.fonts
+            opts["custom_fonts_only"] = True
+    else:
+        screen = _resolve_screen(fp.os, fp.screen_width, fp.screen_height)
+        if screen is not None:
+            opts["screen"] = screen
     if profile.proxy.is_set:
         opts["proxy"] = profile.proxy.playwright_dict()
     return opts

@@ -39,6 +39,13 @@ class Proxy(BaseModel):
 
 class FingerprintModel(BaseModel):
     os: str = "windows"
+    # Mobile (Android) emulation; defaults keep desktop/older stored profiles valid.
+    is_mobile: bool = False
+    device_name: str = ""
+    user_agent: str = ""
+    app_version: str = ""
+    platform: str = ""
+    oscpu: str = ""
     screen_width: int = 1920
     screen_height: int = 1080
     webgl_vendor: str = ""

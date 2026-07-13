@@ -29,6 +29,12 @@ Those uses are illegal in many jurisdictions and are not supported.
 - **Profile management** — create, edit, clone, delete, and **bulk-create** N
   fully-randomized profiles at once. Fully isolated persistent storage per profile
   (`~/.antidetect/profiles/<id>`).
+- **Desktop *and* phone profiles** — pick Windows / macOS / Linux, or an **Android
+  phone** (Pixel, Galaxy, OnePlus, Xiaomi presets). Mobile profiles pin a coherent
+  Firefox-for-Android identity: mobile user-agent, phone screen size + high DPR,
+  touch points, `Linux armv8l` platform, mobile GPU strings, and an Android-only
+  font set (no desktop-font leak). Only Android is offered — an iPhone runs WebKit,
+  so an iOS UA over Camoufox's Gecko engine would be incoherent and detectable.
 - **Deep fingerprint spoofing** — a coherent device fingerprint where *everything*
   agrees and stays identical across launches. Randomized and pinned per profile:
   - OS, GPU (from Camoufox's validated real-device DB, via `webgl_config`), screen

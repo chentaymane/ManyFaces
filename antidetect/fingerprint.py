@@ -52,6 +52,44 @@ _SAMPLE_RATES = [44100, 48000]
 _DNT = ["unspecified", "1", "0"]
 _OS_CHOICES = ["windows", "macos", "linux"]
 
+# --- mobile (Android phone) profiles ------------------------------------------
+# Camoufox is a desktop-Gecko build, so a "phone" profile is Firefox-for-Android
+# emulation: the whole navigator/screen/touch/UA surface is pinned to a real
+# device, which is what mobile fingerprinting keys off. WebGL exposes the phone's
+# GPU vendor/renderer strings (the deep GL parameter set stays desktop-derived —
+# Camoufox only ships a desktop GPU database). Only Android is offered: an iPhone
+# runs WebKit, and presenting an iOS UA over a Gecko engine would be incoherent.
+_MOBILE_OS = {"android"}
+
+# Real device presets: name, css_w, css_h, dpr, android_ver, gpu_vendor,
+# gpu_renderer, cores. Screen sizes are CSS pixels (what screen.width reports).
+_ANDROID_DEVICES = [
+    ("Google Pixel 6",     412, 915, 2.625, "14", "ARM",      "Mali-G78",        8),
+    ("Google Pixel 7",     412, 915, 2.625, "14", "ARM",      "Mali-G710",       8),
+    ("Google Pixel 8",     412, 915, 2.625, "14", "ARM",      "Mali-G715",       9),
+    ("Samsung Galaxy S21", 360, 800, 3.0,   "14", "Qualcomm", "Adreno (TM) 660", 8),
+    ("Samsung Galaxy S22", 360, 780, 3.0,   "14", "Qualcomm", "Adreno (TM) 730", 8),
+    ("Samsung Galaxy S23", 360, 780, 3.0,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+    ("OnePlus 11",         412, 919, 3.5,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+    ("Xiaomi 13",          393, 873, 3.0,   "14", "Qualcomm", "Adreno (TM) 740", 8),
+]
+
+# The limited font set a stock Firefox-for-Android exposes (no desktop fonts).
+_ANDROID_FONTS = [
+    "Roboto", "Roboto Condensed", "Roboto Mono", "Noto Sans", "Noto Serif",
+    "Noto Sans Mono", "Noto Color Emoji", "Droid Sans", "Droid Sans Mono",
+]
+
+
+def _firefox_major() -> str:
+    """Major Firefox version of the installed Camoufox, for a matching mobile UA."""
+    try:
+        from camoufox.pkgman import installed_verstr
+
+        return installed_verstr().split(".", 1)[0]
+    except Exception:  # noqa: BLE001 - engine not installed yet; use a sane default
+        return "135"
+
 
 def _sample_webgl(os_name: str, rng) -> tuple[str, str]:
     """Return a valid (vendor, renderer) pair for this OS.
@@ -108,6 +146,14 @@ def _private_ipv4(rng) -> str:
 @dataclass
 class Fingerprint:
     os: str = "windows"
+    # Mobile (Android) emulation. is_mobile flips the whole config to a phone
+    # identity; the fields below are empty/False for desktop profiles.
+    is_mobile: bool = False
+    device_name: str = ""
+    user_agent: str = ""
+    app_version: str = ""
+    platform: str = ""
+    oscpu: str = ""
     screen_width: int = 1920
     screen_height: int = 1080
     webgl_vendor: str = ""
@@ -156,7 +202,7 @@ class Fingerprint:
         constraint and `webgl_config` args respectively), so they are not here.
         Every key below is validated against Camoufox's property list.
         """
-        return {
+        cfg: dict[str, Any] = {
             "navigator.hardwareConcurrency": self.hardware_concurrency,
             "navigator.doNotTrack": self.do_not_track,
             "navigator.maxTouchPoints": self.max_touch_points,
@@ -178,17 +224,103 @@ class Fingerprint:
             "mediaDevices:speakers": self.speakers,
             "timezone": self.timezone,
         }
+        if self.is_mobile:
+            # Pin the phone identity directly. These land in `config` before
+            # Camoufox merges its (desktop) BrowserForge fingerprint, and its
+            # merge never overwrites keys we've already set — so ours win.
+            cfg.update({
+                "navigator.userAgent": self.user_agent,
+                "navigator.appVersion": self.app_version,
+                "navigator.appCodeName": "Mozilla",
+                "navigator.platform": self.platform,
+                "navigator.oscpu": self.oscpu,
+                "screen.width": self.screen_width,
+                "screen.height": self.screen_height,
+                "screen.availWidth": self.screen_width,
+                "screen.availHeight": self.screen_height,
+                "window.innerWidth": self.screen_width,
+                "window.innerHeight": self.screen_height,
+                "window.outerWidth": self.screen_width,
+                "window.outerHeight": self.screen_height,
+                "window.screenX": 0,
+                "window.screenY": 0,
+                # Mobile GPU strings (the GL parameter set stays desktop-derived;
+                # Camoufox ships no mobile GPU database). Set here rather than via
+                # the `webgl_config` arg, which validates against that DB and would
+                # reject a phone GPU.
+                "webGl:vendor": self.webgl_vendor,
+                "webGl:renderer": self.webgl_renderer,
+            })
+        return cfg
 
     def webgl_config(self) -> tuple[str, str] | None:
-        """The (vendor, renderer) pair for Camoufox's `webgl_config` argument."""
+        """The (vendor, renderer) pair for Camoufox's `webgl_config` argument.
+
+        Mobile profiles return None: their GPU strings are injected through the
+        `config` map instead (see `camoufox_config`), because `webgl_config`
+        validates against Camoufox's desktop-only GPU database.
+        """
+        if self.is_mobile:
+            return None
         if self.webgl_vendor and self.webgl_renderer:
             return (self.webgl_vendor, self.webgl_renderer)
         return None
 
 
+def _generate_android(rng) -> Fingerprint:
+    """Generate a coherent Firefox-for-Android phone fingerprint."""
+    name, w, h, dpr, andver, gpu_v, gpu_r, cores = rng.choice(_ANDROID_DEVICES)
+    lang, region, tz = rng.choice(_LOCALES)
+    ff = _firefox_major()
+    ua = f"Mozilla/5.0 (Android {andver}; Mobile; rv:{ff}.0) Gecko/{ff}.0 Firefox/{ff}.0"
+
+    # Phones almost always run on battery; sometimes plugged in and charging.
+    charging = rng.random() < 0.35
+    level = round(rng.uniform(0.2, 0.98), 2)
+
+    return Fingerprint(
+        os="android",
+        is_mobile=True,
+        device_name=name,
+        user_agent=ua,
+        app_version=ua.split("Mozilla/", 1)[-1],  # navigator.appVersion drops the prefix
+        platform="Linux armv8l",
+        oscpu="Linux armv8l",
+        screen_width=w,
+        screen_height=h,
+        webgl_vendor=gpu_v,
+        webgl_renderer=gpu_r,
+        hardware_concurrency=cores,
+        device_memory=rng.choice([4, 6, 8, 8, 12]),
+        language=lang,
+        region=region,
+        timezone=tz,
+        color_depth=24,
+        device_pixel_ratio=dpr,
+        max_touch_points=5,
+        do_not_track=rng.choice(_DNT),
+        audio_sample_rate=48000,
+        audio_channels=2,
+        canvas_aa_offset=rng.randint(-8, 8),
+        canvas_aa_cap_offset=rng.random() < 0.5,
+        fonts=list(_ANDROID_FONTS),
+        fonts_spacing_seed=rng.randint(0, 1_000_000),
+        battery_charging=charging,
+        battery_level=level,
+        battery_charging_time=float(rng.choice([0, 900, 1800, 2700])) if charging else 0.0,
+        battery_discharging_time=0.0 if charging else float(rng.choice([3600, 7200, 10800, 14400])),
+        webcams=rng.choice([1, 2, 2]),
+        micros=1,
+        speakers=1,
+        webrtc_local_ipv4=_private_ipv4(rng),
+    )
+
+
 def generate(os_name: str | None = None, seed: str | None = None) -> Fingerprint:
     """Generate a fresh, internally-coherent, deeply-randomized fingerprint."""
     rng = random.Random(seed) if seed else random
+    if os_name in _MOBILE_OS:
+        return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)
 
     vendor, renderer = _sample_webgl(os_name, rng)
