@@ -302,9 +302,38 @@ class Fingerprint:
         return None
 
 
-def _generate_android(rng) -> Fingerprint:
-    """Generate a coherent Firefox-for-Android phone fingerprint."""
-    name, w, h, dpr, andver, gpu_v, gpu_r, cores = rng.choice(_ANDROID_DEVICES)
+def list_mobile_devices() -> list[dict[str, Any]]:
+    """All selectable phone presets, for the 'New Phone' device picker.
+
+    Android first (the stronger, coherent spoof), then iPhone. `name` is the stable
+    id passed back to `generate(device=…)`.
+    """
+    out: list[dict[str, Any]] = []
+    for name, w, h, dpr, andver, gpu_v, gpu_r, cores in _ANDROID_DEVICES:
+        out.append({"name": name, "os": "android", "screen": f"{w}×{h}", "dpr": dpr})
+    for name, w, h, dpr, iosver, cores in _IOS_DEVICES:
+        out.append({"name": name, "os": "ios", "screen": f"{w}×{h}", "dpr": dpr})
+    return out
+
+
+def _find_device(name: str):
+    """Return ("android"|"ios", preset tuple) for a device name, or None."""
+    for d in _ANDROID_DEVICES:
+        if d[0] == name:
+            return "android", d
+    for d in _IOS_DEVICES:
+        if d[0] == name:
+            return "ios", d
+    return None
+
+
+def _generate_android(rng, device=None) -> Fingerprint:
+    """Generate a coherent Firefox-for-Android phone fingerprint.
+
+    Pass `device` (a preset tuple) to pin a specific phone; otherwise one is picked
+    at random.
+    """
+    name, w, h, dpr, andver, gpu_v, gpu_r, cores = device or rng.choice(_ANDROID_DEVICES)
     lang, region, tz = rng.choice(_LOCALES)
     ff = _firefox_major()
     ua = f"Mozilla/5.0 (Android {andver}; Mobile; rv:{ff}.0) Gecko/{ff}.0 Firefox/{ff}.0"
@@ -351,15 +380,17 @@ def _generate_android(rng) -> Fingerprint:
     )
 
 
-def _generate_ios(rng) -> Fingerprint:
+def _generate_ios(rng, device=None) -> Fingerprint:
     """Generate a best-effort iOS-Safari iPhone fingerprint.
 
     NOTE: Camoufox runs Gecko, not WebKit, so this is a spoof of the visible iOS
     Safari surface (UA, platform, Apple GPU, iOS fonts, touch), not a real WebKit
     engine — an engine-level probe can still distinguish it. Use Android for the
     strongest mobile identity; use this when an iPhone specifically is required.
+
+    Pass `device` (a preset tuple) to pin a specific iPhone; otherwise random.
     """
-    name, w, h, dpr, iosver, cores = rng.choice(_IOS_DEVICES)
+    name, w, h, dpr, iosver, cores = device or rng.choice(_IOS_DEVICES)
     lang, region, tz = rng.choice(_LOCALES)
     dotted = iosver.replace("_", ".")
     ua = (
@@ -417,14 +448,23 @@ def _generate_ios(rng) -> Fingerprint:
 _RANDOM_OS_POOL = ["windows", "windows", "macos", "linux", "android", "android"]
 
 
-def generate(os_name: str | None = None, seed: str | None = None) -> Fingerprint:
+def generate(
+    os_name: str | None = None, seed: str | None = None, device: str | None = None
+) -> Fingerprint:
     """Generate a fresh, internally-coherent, deeply-randomized fingerprint.
 
     With no `os_name`, one is drawn from `_RANDOM_OS_POOL`, which now includes
     Android — so bulk/random creation yields a natural mix of desktop and phone
-    profiles.
+    profiles. Pass `device` (a preset name from `list_mobile_devices()`) to pin a
+    specific phone model; it overrides `os_name`.
     """
     rng = random.Random(seed) if seed else random
+    if device:
+        found = _find_device(device)
+        if found:
+            kind, tup = found
+            return _generate_ios(rng, tup) if kind == "ios" else _generate_android(rng, tup)
+        # Unknown device name: fall back to os-based generation below.
     if os_name is None:
         os_name = rng.choice(_RANDOM_OS_POOL)
     if os_name == "ios":

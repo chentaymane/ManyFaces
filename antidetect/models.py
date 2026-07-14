@@ -11,6 +11,10 @@ from .fingerprint import Fingerprint, generate as generate_fingerprint
 
 ProxyType = Literal["http", "https", "socks5"]
 ProxyMode = Literal["manual", "random", "rotate"]
+# Which browser engine a profile launches with.
+#   camoufox  — patched Firefox, native-level fingerprint spoofing (strongest stealth)
+#   chromium  — Playwright Chromium, best site compatibility + true mobile emulation
+Engine = Literal["camoufox", "chromium"]
 
 
 class Proxy(BaseModel):
@@ -90,6 +94,7 @@ class Profile(BaseModel):
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
     start_url: str = "about:blank"
+    engine: Engine = "camoufox"    # browser engine to launch (see Engine above)
     proxy: Proxy = Field(default_factory=Proxy)
     # Proxy selection: "manual" uses `proxy`; "random"/"rotate" pick from `proxy_pool`
     # at launch (random draw, or round-robin advancing `rotation_index`).
@@ -129,10 +134,12 @@ class ProfileCreate(BaseModel):
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
     start_url: str = "about:blank"
+    engine: Engine = "camoufox"
     proxy: Optional[Proxy] = None
     proxy_mode: ProxyMode = "manual"
     proxy_pool: list[Proxy] = Field(default_factory=list)
     os: Optional[str] = None            # constrain generated fingerprint to this OS
+    device: Optional[str] = None        # pin a specific phone model (see list_mobile_devices)
     fingerprint: Optional[FingerprintModel] = None  # or supply one fully
     humanize: bool = True
     block_webrtc: bool = True
@@ -142,13 +149,14 @@ class ProfileCreate(BaseModel):
         fp = (
             self.fingerprint.to_fingerprint()
             if self.fingerprint
-            else generate_fingerprint(os_name=self.os)
+            else generate_fingerprint(os_name=self.os, device=self.device)
         )
         return Profile(
             name=self.name,
             notes=self.notes,
             tags=self.tags,
             start_url=self.start_url,
+            engine=self.engine,
             proxy=self.proxy or Proxy(),
             proxy_mode=self.proxy_mode,
             proxy_pool=self.proxy_pool,
@@ -164,6 +172,7 @@ class ProfileUpdate(BaseModel):
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
     start_url: Optional[str] = None
+    engine: Optional[Engine] = None
     proxy: Optional[Proxy] = None
     proxy_mode: Optional[ProxyMode] = None
     proxy_pool: Optional[list[Proxy]] = None

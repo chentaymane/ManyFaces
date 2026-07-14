@@ -24,17 +24,28 @@ Those uses are illegal in many jurisdictions and are not supported.
 
 ## Features
 
+- **Two browser engines, per profile** — pick **Camoufox** (patched Firefox, the
+  strongest native-level stealth) or **Chromium** (Playwright Chromium) on each
+  profile. Chromium is for sites that block Firefox, and it renders phone profiles
+  as a **true mobile interface** (real device viewport, high DPR, touch, mobile
+  layout) — emulation Firefox/Gecko can't do. Fingerprints (navigator, screen,
+  WebGL GPU strings, touch) are pinned on both engines and stay identical across
+  launches; `navigator.webdriver` is hidden on Chromium too.
 - **Desktop app** — runs in a native window (pywebview / WebView2), not a browser
   tab. `python desktop.py`.
 - **Profile management** — create, edit, clone, delete, and **bulk-create** N
   fully-randomized profiles at once. Fully isolated persistent storage per profile
   (`~/.antidetect/profiles/<id>`).
-- **Desktop *and* phone profiles** — pick Windows / macOS / Linux, or an **Android
-  phone** (Pixel, Galaxy, OnePlus, Xiaomi presets). Mobile profiles pin a coherent
-  Firefox-for-Android identity: mobile user-agent, phone screen size + high DPR,
-  touch points, `Linux armv8l` platform, mobile GPU strings, and an Android-only
-  font set (no desktop-font leak). Only Android is offered — an iPhone runs WebKit,
-  so an iOS UA over Camoufox's Gecko engine would be incoherent and detectable.
+- **One-click phone profiles** — a dedicated **📱 New Phone** button: pick a real
+  device (Pixel, Galaxy, OnePlus, Xiaomi, or iPhone presets) and hit **Create &
+  launch**. Phone profiles default to the **Chromium** engine, which renders them as
+  a true phone — real mobile viewport, high DPR, touch, and mobile page layout — with
+  a coherent per-device fingerprint (UA, screen, GPU strings, touch) pinned across
+  launches. On the **Camoufox** engine, phones instead run a coherent
+  Firefox-for-Android identity (mobile UA, phone screen + DPR, `Linux armv8l`
+  platform, mobile GPU strings, Android-only font set). iPhone is offered on both,
+  but is a weaker spoof than Android (an iPhone runs WebKit while both engines are
+  non-WebKit), so an engine-level probe can still tell.
 - **Deep fingerprint spoofing** — a coherent device fingerprint where *everything*
   agrees and stays identical across launches. Randomized and pinned per profile:
   - OS, GPU (from Camoufox's validated real-device DB, via `webgl_config`), screen
@@ -187,7 +198,6 @@ data lives on disk per profile.
 ## Roadmap toward parity with commercial tools
 
 - Full BrowserForge fingerprint serialization (pin every attribute, not just core).
-- Chromium engine option (patched build) for sites that block Firefox.
 - Team features: multi-user, roles, shared/encrypted proxy pool.
 - Profile "warm-up" automation and cookie robot.
 - Fingerprint quality scoring against CreepJS/Pixelscan in-app.

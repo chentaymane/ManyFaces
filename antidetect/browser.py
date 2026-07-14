@@ -23,6 +23,36 @@ class BrowserError(RuntimeError):
     pass
 
 
+def normalize_start_url(url: str | None) -> str:
+    """Turn whatever the user typed into a URL a browser will actually load.
+
+    The #1 "it doesn't work" bug was a start URL like `google.com` or
+    `www.example.com` with no scheme: `page.goto()` treats that as an invalid URL
+    and the tab lands on an error page. We fix it up here:
+      - blank / None                       -> about:blank
+      - already has a scheme (http, https,
+        about, file, data, chrome, …)      -> left untouched
+      - a bare host/path (`google.com/x`)  -> gets an `https://` prefix
+    """
+    url = (url or "").strip()
+    if not url:
+        return "about:blank"
+    # A scheme looks like `word:` at the very start (http:, https:, about:, file:,
+    # data:, chrome:, view-source:, …). If one is present, trust the user — UNLESS
+    # what follows the colon is just a port number, in which case it's really a
+    # `host:port` (e.g. `localhost:8000`) and needs an https:// prefix.
+    import re
+
+    m = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):(.*)$", url, re.DOTALL)
+    if m and not m.group(2).split("/")[0].isdigit():
+        return url
+    # Protocol-relative URL (`//host/…`) -> assume https.
+    if url.startswith("//"):
+        return "https:" + url
+    # Otherwise it's a bare domain/path; default to https.
+    return "https://" + url
+
+
 def activate_bundled_engine() -> bool:
     """If the app ships a bundled browser, make Camoufox use it without downloading.
 
@@ -199,6 +229,171 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
     return opts
 
 
+# --------------------------------------------------------------- chromium ----
+# A second engine option. Camoufox (Firefox) is the strongest stealth, but some
+# sites block Firefox outright, and Firefox/Juggler rejects the true mobile-emulation
+# knobs (isMobile, touch, deviceScaleFactor). Chromium via Playwright fills both
+# gaps: broad site compatibility, and a *real* phone interface for mobile profiles
+# (DevTools-style device emulation — proper viewport, DPR, touch, mobile layout).
+# It is less stealthy than Camoufox, so it's an explicit per-profile choice.
+
+_CHROME_MAJOR: Optional[str] = None
+
+
+def _chrome_major(pw) -> str:
+    """Major version of Playwright's bundled Chromium, for a coherent Chrome UA.
+
+    Probed once (cheap headless launch) and cached for the process; falls back to a
+    recent stable major if the probe fails.
+    """
+    global _CHROME_MAJOR
+    if _CHROME_MAJOR is None:
+        try:
+            b = pw.chromium.launch()
+            _CHROME_MAJOR = b.version.split(".", 1)[0]
+            b.close()
+        except Exception:  # noqa: BLE001
+            _CHROME_MAJOR = "148"
+    return _CHROME_MAJOR
+
+
+# UA platform token + navigator.platform value per desktop OS.
+_CHROME_DESKTOP = {
+    "windows": ("Windows NT 10.0; Win64; x64", "Win32"),
+    "macos": ("Macintosh; Intel Mac OS X 10_15_7", "MacIntel"),
+    "linux": ("X11; Linux x86_64", "Linux x86_64"),
+}
+
+
+def _chrome_ua(fp, major: str) -> str:
+    """Build a coherent Chrome user-agent for this profile's device.
+
+    The stored `user_agent` is a *Firefox* string (built for Camoufox); on Chromium
+    that would be incoherent, so we synthesise a matching Chrome UA instead.
+    """
+    if fp.os == "ios":
+        # Chrome-on-iOS is still WebKit; the stored Safari UA is the honest choice
+        # and is exactly what DevTools uses for an emulated iPhone.
+        return fp.user_agent
+    if fp.os == "android" or fp.is_mobile:
+        import re
+
+        m = re.search(r"Android (\d+)", fp.user_agent or "")
+        andver = m.group(1) if m else "14"
+        model = (fp.device_name or "Pixel 7").replace("Google ", "").strip()
+        return (
+            f"Mozilla/5.0 (Linux; Android {andver}; {model}) "
+            f"AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{major}.0.0.0 Mobile Safari/537.36"
+        )
+    ua_plat, _ = _CHROME_DESKTOP.get(fp.os, _CHROME_DESKTOP["windows"])
+    return (
+        f"Mozilla/5.0 ({ua_plat}) AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
+def _nav_platform(fp) -> str:
+    if fp.is_mobile:
+        return "iPhone" if fp.os == "ios" else "Linux armv8l"
+    return _CHROME_DESKTOP.get(fp.os, _CHROME_DESKTOP["windows"])[1]
+
+
+def chromium_init_script(fp) -> str:
+    """JS injected into every page to pin the fingerprint on the Chromium engine.
+
+    Chromium has no native spoofing layer like Camoufox, so we override the
+    JS-visible surface: hide the webdriver flag, and pin navigator/screen/WebGL to
+    the profile's stored values so the device looks the same every launch.
+    """
+    import json
+
+    vendor = json.dumps(fp.webgl_vendor or "Google Inc.")
+    renderer = json.dumps(fp.webgl_renderer or "ANGLE (Unknown)")
+    platform = json.dumps(_nav_platform(fp))
+    languages = json.dumps([fp.language, fp.language.split("-")[0]])
+    return f"""
+(() => {{
+  const def = (obj, prop, val) => {{
+    try {{ Object.defineProperty(obj, prop, {{ get: () => val, configurable: true }}); }} catch (e) {{}}
+  }};
+  // Hide the automation flag Playwright sets.
+  def(navigator, 'webdriver', undefined);
+  def(navigator, 'hardwareConcurrency', {fp.hardware_concurrency});
+  def(navigator, 'deviceMemory', {fp.device_memory});
+  def(navigator, 'platform', {platform});
+  def(navigator, 'maxTouchPoints', {fp.max_touch_points});
+  def(navigator, 'languages', {languages});
+  // Pin the screen geometry.
+  def(screen, 'width', {fp.screen_width});
+  def(screen, 'height', {fp.screen_height});
+  def(screen, 'availWidth', {fp.screen_width});
+  def(screen, 'availHeight', {fp.screen_height});
+  def(screen, 'colorDepth', {fp.color_depth});
+  def(screen, 'pixelDepth', {fp.color_depth});
+  // Pin the GPU strings reported through WEBGL_debug_renderer_info.
+  const VENDOR = {vendor}, RENDERER = {renderer};
+  for (const proto of [self.WebGLRenderingContext, self.WebGL2RenderingContext]) {{
+    if (!proto) continue;
+    const gp = proto.prototype.getParameter;
+    proto.prototype.getParameter = function (p) {{
+      if (p === 37445) return VENDOR;    // UNMASKED_VENDOR_WEBGL
+      if (p === 37446) return RENDERER;  // UNMASKED_RENDERER_WEBGL
+      return gp.call(this, p);
+    }};
+  }}
+}})();
+"""
+
+
+def build_chromium_options(profile: Profile, pw) -> dict[str, Any]:
+    """Build launch_persistent_context() options for a Chromium profile."""
+    fp = profile.fingerprint.to_fingerprint()
+    base = config.profile_data_dir(profile.id)
+    # Keep Chromium's user-data separate from Camoufox's (different on-disk formats),
+    # so a profile can even be launched on either engine without corruption.
+    cdir = base / "chromium"
+    cdir.mkdir(parents=True, exist_ok=True)
+
+    major = _chrome_major(pw)
+    ua = _chrome_ua(fp, major)
+    w, h = fp.screen_width, fp.screen_height
+
+    args = ["--disable-blink-features=AutomationControlled"]
+    opts: dict[str, Any] = {
+        "user_data_dir": str(cdir),
+        "headless": False,
+        "user_agent": ua,
+        "locale": fp.locale.split(",")[0],
+        "timezone_id": fp.timezone,
+        "color_scheme": "light",
+        "args": args,
+        # Drop the "Chrome is being controlled by automated software" banner.
+        "ignore_default_args": ["--enable-automation"],
+    }
+    if fp.is_mobile:
+        # A genuine phone interface: fixed device viewport, high DPR, touch, and a
+        # mobile layout (isMobile). This is what Camoufox/Firefox can't do.
+        opts.update({
+            "viewport": {"width": w, "height": h},
+            "screen": {"width": w, "height": h},
+            "device_scale_factor": fp.device_pixel_ratio,
+            "is_mobile": True,
+            "has_touch": True,
+        })
+        # Size the OS window to the phone (plus room for the toolbar).
+        args.append(f"--window-size={w},{h + 130}")
+    else:
+        # Desktop: let the real window drive the viewport; pin its size.
+        opts["no_viewport"] = True
+        if fp.max_touch_points > 0:
+            opts["has_touch"] = True
+        args.append(f"--window-size={w},{h}")
+    if profile.proxy.is_set:
+        opts["proxy"] = profile.proxy.playwright_dict()
+    return opts
+
+
 class BrowserSession:
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
@@ -231,6 +426,16 @@ class BrowserSession:
 
     def _run(self) -> None:
         try:
+            if self.profile.engine == "chromium":
+                self._run_chromium()
+            else:
+                self._run_camoufox()
+        except Exception as exc:  # noqa: BLE001
+            self.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            self._ready.set()
+
+    def _run_camoufox(self) -> None:
+        try:
             from camoufox.sync_api import Camoufox
         except ImportError:
             self.error = (
@@ -239,13 +444,68 @@ class BrowserSession:
             )
             self._ready.set()
             return
-
         opts = build_launch_options(self.profile)
+        self._launch(Camoufox, opts)
+
+    def _run_chromium(self) -> None:
         try:
-            self._launch(Camoufox, opts)
-        except Exception as exc:  # noqa: BLE001
-            self.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.error = (
+                "Playwright is not installed. Run: pip install playwright "
+                "&& python -m playwright install chromium"
+            )
             self._ready.set()
+            return
+
+        fp = self.profile.fingerprint.to_fingerprint()
+        with sync_playwright() as pw:
+            try:
+                opts = build_chromium_options(self.profile, pw)
+                context = pw.chromium.launch_persistent_context(**opts)
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                if "executable doesn't exist" in msg or "Executable doesn't exist" in msg:
+                    self.error = (
+                        "Chromium is not installed for Playwright. Run: "
+                        "python -m playwright install chromium"
+                    )
+                else:
+                    self.error = f"{type(exc).__name__}: {exc}"
+                self._ready.set()
+                return
+
+            # Pin the fingerprint on every document, then stage cookies.
+            try:
+                context.add_init_script(chromium_init_script(fp))
+            except Exception:  # noqa: BLE001
+                pass
+            staged = cookie_store.load(self.profile.id)
+            if staged:
+                try:
+                    context.add_cookies(staged)
+                except Exception:  # noqa: BLE001 - bad cookies shouldn't kill the session
+                    pass
+
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                page.goto(normalize_start_url(self.profile.start_url), wait_until="domcontentloaded")
+            except Exception:  # noqa: BLE001 - navigation failure shouldn't close the window
+                pass
+
+            self._ready.set()
+            while not self._stop.is_set():
+                if self._stop.wait(timeout=1.0):
+                    break
+                try:
+                    if not context.pages:
+                        break  # user closed the last tab/window
+                except Exception:  # noqa: BLE001 - context already gone
+                    break
+            try:
+                context.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _launch(self, Camoufox, opts: dict[str, Any]) -> None:
         with Camoufox(**opts) as browser:
@@ -259,7 +519,7 @@ class BrowserSession:
 
             page = browser.pages[0] if getattr(browser, "pages", None) else browser.new_page()
             try:
-                page.goto(self.profile.start_url or "about:blank", wait_until="domcontentloaded")
+                page.goto(normalize_start_url(self.profile.start_url), wait_until="domcontentloaded")
             except Exception:  # noqa: BLE001 - navigation failure shouldn't close the window
                 pass
 

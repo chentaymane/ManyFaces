@@ -506,6 +506,12 @@ async def fetch_free_proxies(req: FreeProxyRequest) -> dict[str, Any]:
 
 # -------------------------------------------------------------- fingerprint ---
 
+@app.get("/api/devices")
+def list_devices() -> dict[str, Any]:
+    """Selectable phone presets for the 'New Phone' picker (Android first, then iPhone)."""
+    return {"devices": fp_gen.list_mobile_devices()}
+
+
 @app.get("/api/fingerprint/generate")
 def generate_fp(os: str | None = None) -> dict[str, Any]:
     return fp_gen.generate(os_name=os).to_dict()
@@ -544,6 +550,7 @@ class BulkCreateRequest(BaseModel):
     count: int = 5
     name_prefix: str = "Profile"
     os: str | None = None          # None => random OS per profile
+    engine: str = "camoufox"       # browser engine for every created profile
     seed_cookies: int = 15         # random cookies per profile (0 = none)
 
 
@@ -553,7 +560,7 @@ def bulk_create(req: BulkCreateRequest) -> dict[str, Any]:
     count = max(1, min(req.count, 200))
     created: list[dict[str, Any]] = []
     for i in range(count):
-        payload = ProfileCreate(name=f"{req.name_prefix} {i + 1}", os=req.os)
+        payload = ProfileCreate(name=f"{req.name_prefix} {i + 1}", os=req.os, engine=req.engine)  # type: ignore[arg-type]
         profile = db.create(payload.build())
         if req.seed_cookies > 0:
             cookie_store.save(profile.id, cookie_store.generate_random(count=req.seed_cookies))

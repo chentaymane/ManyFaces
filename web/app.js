@@ -26,6 +26,11 @@ function esc(s) {
 
 const OS_ICON = { windows: "🪟", macos: "🍎", linux: "🐧", android: "📱", ios: "🍏" };
 
+function engineBadge(engine) {
+  const chromium = engine === "chromium";
+  return `<span class="badge engine ${chromium ? "chromium" : "camoufox"}" title="${chromium ? "Chromium engine" : "Camoufox (Firefox) engine"}">${chromium ? "🌐 Chromium" : "🦊 Camoufox"}</span>`;
+}
+
 // ------------------------------------------------------------- render list ---
 function deviceCell(fp) {
   if (fp.is_mobile) {
@@ -61,7 +66,7 @@ function renderList(profiles) {
       : `<button class="sm primary" data-act="start" data-id="${p.id}">Launch</button>`;
     return `<tr>
       <td><div class="name">${esc(p.name)}</div><div class="sub">${fp.screen_width}×${fp.screen_height}</div></td>
-      <td>${deviceCell(fp)}</td>
+      <td>${deviceCell(fp)}<div class="sub">${engineBadge(p.engine)}</div></td>
       <td>${proxyCell(p)}</td>
       <td class="hide-sm sub">${esc(fp.language)} · ${esc(fp.timezone)}</td>
       <td class="hide-sm"><button class="sm ghost" data-act="cookies" data-id="${p.id}">Cookies</button></td>
@@ -135,6 +140,14 @@ $("#profiles-body").addEventListener("click", async (e) => {
 });
 
 // ------------------------------------------------------------------- editor ---
+function updateEngineHint() {
+  const engine = $("#f-engine").value;
+  $("#engine-hint").textContent = engine === "chromium"
+    ? "Chromium: best site compatibility, and phone profiles get a true mobile interface (real viewport, touch, DPR). Slightly less stealthy than Camoufox."
+    : "Camoufox: patched Firefox with native-level fingerprint spoofing — the strongest stealth. Phone profiles are emulated at the browser level.";
+}
+$("#f-engine").addEventListener("change", updateEngineHint);
+
 function setProxyMode(mode) {
   proxyMode = mode;
   $$("#proxy-mode button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
@@ -161,6 +174,7 @@ function readForm() {
   return {
     name: $("#f-name").value.trim(),
     os: $("#f-os").value || null,
+    engine: $("#f-engine").value || "camoufox",
     start_url: $("#f-url").value.trim() || "about:blank",
     humanize: $("#f-humanize").checked,
     block_webrtc: $("#f-webrtc").checked,
@@ -179,6 +193,8 @@ function fillForm(p) {
   $("#f-name").value = p?.name || "";
   $("#f-os").value = p?.fingerprint?.os || "";
   $("#f-os").disabled = !!p; // OS/device is fixed after creation (randomize to change)
+  $("#f-engine").value = p?.engine || "camoufox";
+  updateEngineHint();
   $("#f-url").value = p?.start_url || "about:blank";
   $("#f-humanize").checked = p ? p.humanize : true;
   $("#f-webrtc").checked = p ? p.block_webrtc : true;
@@ -245,7 +261,7 @@ $("#modal-save").addEventListener("click", async () => {
       if (!pool.length) return toast("Add at least one proxy, or switch to Manual", "err");
     }
     const common = {
-      name: form.name, start_url: form.start_url, proxy: form.proxy,
+      name: form.name, start_url: form.start_url, engine: form.engine, proxy: form.proxy,
       proxy_mode: proxyMode, proxy_pool: pool,
       humanize: form.humanize, block_webrtc: form.block_webrtc, geoip: form.geoip,
     };
@@ -409,6 +425,7 @@ $("#bulk-create").addEventListener("click", async () => {
     count,
     name_prefix: $("#bulk-prefix").value.trim() || "Profile",
     os: $("#bulk-os").value || null,
+    engine: $("#bulk-engine").value || "camoufox",
     seed_cookies: parseInt($("#bulk-cookies").value || "0", 10),
   };
   try {
@@ -420,6 +437,99 @@ $("#bulk-create").addEventListener("click", async () => {
   } catch (e) { toast(e.message, "err"); }
   finally { $("#bulk-create").textContent = "Create"; $("#bulk-create").disabled = false; }
 });
+
+// --------------------------------------------------------------- new phone ---
+// One-click phone profiles (Multilogin-style): pick a device, and it's created on
+// the Chromium engine so it launches as a real phone (mobile viewport/touch/DPR).
+let deviceCatalog = null;   // cached [{name, os, screen, dpr}]
+
+async function loadDevices() {
+  if (deviceCatalog) return deviceCatalog;
+  const r = await api("/api/devices");
+  deviceCatalog = r.devices || [];
+  return deviceCatalog;
+}
+
+function osLabel(os) { return os === "ios" ? "🍏 iPhone" : "📱 Android"; }
+
+async function openPhone() {
+  $("#phone-name").value = "";
+  $("#phone-url").value = "";
+  $("#phone-device-info").textContent = "";
+  const sel = $("#phone-device");
+  sel.innerHTML = `<option value="">Loading devices…</option>`;
+  $("#phone-modal").classList.remove("hidden");
+  try {
+    const devices = await loadDevices();
+    // Group by OS: Android first (strongest spoof), then iPhone.
+    const groups = { android: [], ios: [] };
+    devices.forEach((d) => (groups[d.os] || (groups[d.os] = [])).push(d));
+    let html = "";
+    for (const os of ["android", "ios"]) {
+      if (!groups[os] || !groups[os].length) continue;
+      html += `<optgroup label="${osLabel(os)}">`;
+      html += groups[os].map((d) => `<option value="${esc(d.name)}">${esc(d.name)} · ${esc(d.screen)} · DPR ${d.dpr}</option>`).join("");
+      html += `</optgroup>`;
+    }
+    sel.innerHTML = html;
+    updatePhoneInfo();
+  } catch (e) {
+    sel.innerHTML = `<option value="">Failed to load: ${esc(e.message)}</option>`;
+  }
+}
+
+function updatePhoneInfo() {
+  const name = $("#phone-device").value;
+  const d = (deviceCatalog || []).find((x) => x.name === name);
+  const info = $("#phone-device-info");
+  if (!d) { info.textContent = ""; return; }
+  info.innerHTML = d.os === "ios"
+    ? `<span class="chip">iPhone · Safari surface</span><span class="chip">${esc(d.screen)} @ ${d.dpr}x</span><span class="chip warn">iOS is a weaker spoof than Android</span>`
+    : `<span class="chip ok">Android · Chrome</span><span class="chip">${esc(d.screen)} @ ${d.dpr}x</span>`;
+}
+$("#phone-device").addEventListener("change", updatePhoneInfo);
+
+async function createPhone(launch) {
+  const name = $("#phone-name").value.trim();
+  const device = $("#phone-device").value;
+  if (!name) return toast("Name is required", "err");
+  if (!device) return toast("Pick a device", "err");
+  const d = (deviceCatalog || []).find((x) => x.name === device);
+  const btn = launch ? $("#phone-launch") : $("#phone-create");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = launch ? "Creating…" : "Creating…";
+  try {
+    const created = await api("/api/profiles", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        engine: "chromium",         // Chromium = real phone rendering
+        os: d ? d.os : "android",
+        device,
+        start_url: $("#phone-url").value.trim() || "about:blank",
+      }),
+    });
+    $("#phone-modal").classList.add("hidden");
+    if (launch) {
+      btn.textContent = "Launching…";
+      const r = await api(`/api/profiles/${created.id}/start`, { method: "POST" });
+      toast(r.proxy ? `Phone launched · ${r.proxy}` : "Phone launched 📱");
+    } else {
+      toast("Phone profile created 📱");
+    }
+    loadProfiles();
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+$("#phone-btn").addEventListener("click", openPhone);
+$("#phone-close").addEventListener("click", () => $("#phone-modal").classList.add("hidden"));
+$("#phone-cancel").addEventListener("click", () => $("#phone-modal").classList.add("hidden"));
+$("#phone-create").addEventListener("click", () => createPhone(false));
+$("#phone-launch").addEventListener("click", () => createPhone(true));
 
 // ------------------------------------------------------------------ cookies ---
 let cookieProfileId = null;

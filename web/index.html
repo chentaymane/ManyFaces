@@ -17,6 +17,7 @@
     </div>
     <div class="header-actions">
       <button id="bulk-btn" class="ghost">⚙ Bulk create</button>
+      <button id="phone-btn" class="ghost">📱 New Phone</button>
       <button id="new-btn" class="primary">+ New Profile</button>
     </div>
   </header>
@@ -68,10 +69,20 @@
             </select>
           </div>
         </div>
-        <div class="field">
-          <label>Start URL</label>
-          <input id="f-url" type="text" value="about:blank" />
+        <div class="row">
+          <div class="field">
+            <label>Start URL</label>
+            <input id="f-url" type="text" placeholder="example.com" value="about:blank" />
+          </div>
+          <div class="field">
+            <label>Browser engine</label>
+            <select id="f-engine">
+              <option value="camoufox">🦊 Camoufox — max stealth (Firefox)</option>
+              <option value="chromium">🌐 Chromium — compatibility + real phone UI</option>
+            </select>
+          </div>
         </div>
+        <div class="field hint" id="engine-hint" style="margin-top:-4px"></div>
 
         <fieldset>
           <legend>Proxy</legend>
@@ -199,10 +210,48 @@
             <input id="bulk-cookies" type="number" value="15" min="0" max="200" />
           </div>
         </div>
+        <div class="field">
+          <label>Browser engine</label>
+          <select id="bulk-engine">
+            <option value="camoufox">🦊 Camoufox — max stealth (Firefox)</option>
+            <option value="chromium">🌐 Chromium — compatibility + real phone UI</option>
+          </select>
+        </div>
       </div>
       <div class="modal-foot">
         <button id="bulk-cancel" class="ghost">Cancel</button>
         <button id="bulk-create" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------- New phone modal ----- -->
+  <div id="phone-modal" class="modal hidden">
+    <div class="modal-card sm">
+      <div class="modal-head">
+        <h2>📱 New phone profile</h2>
+        <button id="phone-close" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="field hint" style="margin-top:0">A real mobile identity: it runs on <strong>Chromium</strong> so pages render as a true phone — mobile viewport, touch, high-DPI screen and a coherent device fingerprint. Pick a device and go.</p>
+        <div class="field">
+          <label>Name</label>
+          <input id="phone-name" type="text" placeholder="Phone account #1" />
+        </div>
+        <div class="field">
+          <label>Device</label>
+          <select id="phone-device"><option value="">Loading devices…</option></select>
+        </div>
+        <div class="phone-device-info" id="phone-device-info"></div>
+        <div class="field">
+          <label>Start URL <span class="hint">— optional</span></label>
+          <input id="phone-url" type="text" placeholder="example.com" />
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="phone-cancel" class="ghost">Cancel</button>
+        <button id="phone-create" class="ghost">Create</button>
+        <button id="phone-launch" class="primary">Create &amp; launch</button>
       </div>
     </div>
   </div>
