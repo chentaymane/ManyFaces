@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, cookies as cookie_store, db, fingerprint as fp_gen, proxy as proxy_mod
+from . import android as android_engine
 from .browser import manager, BrowserError
 from .models import (
     FingerprintModel,
@@ -31,6 +32,15 @@ app = FastAPI(title="ManyFaces", version="0.1.0")
 def _startup() -> None:
     config.ensure_dirs()
     db.init()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    # Android VMs are heavy real processes — don't leak them when the app closes.
+    try:
+        android_engine.manager.stop_all()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @app.middleware("http")
@@ -355,9 +365,18 @@ def engine_ensure() -> dict[str, Any]:
 
 # ---------------------------------------------------------------- profiles ----
 
+def _engine_manager(profile: Profile):
+    """Pick the session manager that owns this profile's engine."""
+    return android_engine.manager if profile.engine == "android" else manager
+
+
+def _is_running(profile_id: str) -> bool:
+    return manager.is_running(profile_id) or android_engine.manager.is_running(profile_id)
+
+
 def _with_status(profile: Profile) -> dict[str, Any]:
     d = profile.model_dump()
-    d["running"] = manager.is_running(profile.id)
+    d["running"] = _is_running(profile.id)
     return d
 
 
@@ -390,8 +409,8 @@ def update_profile(profile_id: str, patch: ProfileUpdate) -> dict[str, Any]:
 
 @app.delete("/api/profiles/{profile_id}", status_code=204)
 def delete_profile(profile_id: str) -> None:
-    if manager.is_running(profile_id):
-        manager.stop(profile_id)
+    manager.stop(profile_id)
+    android_engine.manager.stop(profile_id)
     if not db.delete(profile_id):
         raise HTTPException(404, "Profile not found")
 
@@ -422,11 +441,11 @@ def start_profile(profile_id: str) -> dict[str, Any]:
     if next_index is not None:  # persist rotation so the next launch advances
         db.update(profile_id, ProfileUpdate(rotation_index=next_index))
     try:
-        manager.start(profile)
-    except BrowserError as exc:
+        _engine_manager(profile).start(profile)
+    except (BrowserError, RuntimeError) as exc:
         raise HTTPException(502, str(exc))
     return {
-        "running": manager.is_running(profile_id),
+        "running": _is_running(profile_id),
         "proxy": f"{eff_proxy.type}://{eff_proxy.host}:{eff_proxy.port}" if eff_proxy.is_set else None,
     }
 
@@ -434,12 +453,30 @@ def start_profile(profile_id: str) -> dict[str, Any]:
 @app.post("/api/profiles/{profile_id}/stop")
 def stop_profile(profile_id: str) -> dict[str, Any]:
     manager.stop(profile_id)
+    android_engine.manager.stop(profile_id)
     return {"running": False}
 
 
 @app.get("/api/running")
 def running() -> dict[str, list[str]]:
-    return {"profiles": manager.running_ids()}
+    return {"profiles": manager.running_ids() + android_engine.manager.running_ids()}
+
+
+# ------------------------------------------------------------- android engine ----
+@app.get("/api/android/status")
+def android_status() -> dict[str, Any]:
+    return android_engine.status()
+
+
+@app.post("/api/android/install")
+def android_install() -> dict[str, Any]:
+    started = android_engine.start_install()
+    return {"started": started, **android_engine.install_state.snapshot()}
+
+
+@app.get("/api/android/install/status")
+def android_install_status() -> dict[str, Any]:
+    return android_engine.install_state.snapshot()
 
 
 # -------------------------------------------------------------------- proxy ---

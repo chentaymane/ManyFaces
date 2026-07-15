@@ -14,7 +14,9 @@ ProxyMode = Literal["manual", "random", "rotate"]
 # Which browser engine a profile launches with.
 #   camoufox  — patched Firefox, native-level fingerprint spoofing (strongest stealth)
 #   chromium  — Playwright Chromium, best site compatibility + true mobile emulation
-Engine = Literal["camoufox", "chromium"]
+#   android   — real Android Emulator (AVD): a genuine Chrome-for-Android engine, not
+#               a spoof. Requires the one-click Android SDK install (see android.py).
+Engine = Literal["camoufox", "chromium", "android"]
 
 
 class Proxy(BaseModel):

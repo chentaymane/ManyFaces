@@ -79,6 +79,7 @@
             <select id="f-engine">
               <option value="camoufox">🦊 Camoufox — max stealth (Firefox)</option>
               <option value="chromium">🌐 Chromium — compatibility + real phone UI</option>
+              <option value="android">🤖 Android — real device (AVD emulator)</option>
             </select>
           </div>
         </div>
@@ -233,12 +234,19 @@
         <button id="phone-close" class="icon">✕</button>
       </div>
       <div class="modal-body">
-        <p class="field hint" style="margin-top:0">A real mobile identity: it runs on <strong>Chromium</strong> so pages render as a true phone — mobile viewport, touch, high-DPI screen and a coherent device fingerprint. Pick a device and go.</p>
+        <div class="field">
+          <label>Phone type</label>
+          <div class="seg" id="phone-mode">
+            <button type="button" class="seg-btn active" data-mode="emulated">⚡ Emulated <span>instant</span></button>
+            <button type="button" class="seg-btn" data-mode="android">🤖 Real Android <span>AVD</span></button>
+          </div>
+        </div>
+        <p class="field hint" style="margin-top:-4px" id="phone-mode-hint"></p>
         <div class="field">
           <label>Name</label>
           <input id="phone-name" type="text" placeholder="Phone account #1" />
         </div>
-        <div class="field">
+        <div class="field" id="phone-device-field">
           <label>Device</label>
           <select id="phone-device"><option value="">Loading devices…</option></select>
         </div>
@@ -252,6 +260,25 @@
         <button id="phone-cancel" class="ghost">Cancel</button>
         <button id="phone-create" class="ghost">Create</button>
         <button id="phone-launch" class="primary">Create &amp; launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------ Android setup modal --- -->
+  <div id="android-modal" class="modal hidden">
+    <div class="modal-card sm">
+      <div class="modal-head">
+        <h2>🤖 Real Android engine</h2>
+        <button id="android-close" class="icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="field hint" style="margin-top:0">This boots a <strong>real Android device</strong> in the official emulator — a genuine Chrome-for-Android engine, not a fingerprint spoof. It's free. First-time setup downloads the Android SDK + a system image (<strong>a few GB</strong>) and, if needed, a small Java runtime. After that, each phone profile boots a real device in 20–60s.</p>
+        <div id="android-status-box" class="android-status">Checking…</div>
+        <div id="android-log" class="android-log hidden-block"></div>
+      </div>
+      <div class="modal-foot">
+        <button id="android-cancel" class="ghost">Close</button>
+        <button id="android-install" class="primary">Install Android engine</button>
       </div>
     </div>
   </div>

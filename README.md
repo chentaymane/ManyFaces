@@ -24,13 +24,22 @@ Those uses are illegal in many jurisdictions and are not supported.
 
 ## Features
 
-- **Two browser engines, per profile** — pick **Camoufox** (patched Firefox, the
-  strongest native-level stealth) or **Chromium** (Playwright Chromium) on each
-  profile. Chromium is for sites that block Firefox, and it renders phone profiles
-  as a **true mobile interface** (real device viewport, high DPR, touch, mobile
-  layout) — emulation Firefox/Gecko can't do. Fingerprints (navigator, screen,
-  WebGL GPU strings, touch) are pinned on both engines and stay identical across
-  launches; `navigator.webdriver` is hidden on Chromium too.
+- **Three browser engines, per profile** — pick **Camoufox** (patched Firefox, the
+  strongest native-level stealth), **Chromium** (Playwright Chromium), or **Android**
+  (a real device) on each profile. Chromium is for sites that block Firefox, and it
+  renders phone profiles as a **true mobile interface** (real device viewport, high
+  DPR, touch, mobile layout) — emulation Firefox/Gecko can't do. Fingerprints
+  (navigator, screen, WebGL GPU strings, touch) are pinned on both and stay identical
+  across launches; `navigator.webdriver` is hidden on Chromium too.
+- **Real Android engine (AVD)** — for a phone that isn't emulated at all: the
+  **Android** engine boots a genuine Android device in the official Android Emulator,
+  so the browser inside is real **Chrome-for-Android** (real ARM-ish Blink, real
+  touch/GPU) — nothing spoofed, because it *is* a phone. It's free and set up in one
+  click from the app: the installer fetches the Android SDK + a system image (a few
+  GB) and, if needed, a small Java runtime, streaming live progress. Requires
+  hardware virtualization (WHPX / KVM / Hypervisor.framework). Trade-off vs the
+  emulated engines: each profile is one booting Android VM (20–60s, real RAM/CPU), so
+  it's for authenticity, not running dozens at once.
 - **Desktop app** — runs in a native window (pywebview / WebView2), not a browser
   tab. `python desktop.py`.
 - **Profile management** — create, edit, clone, delete, and **bulk-create** N

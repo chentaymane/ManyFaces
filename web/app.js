@@ -27,8 +27,11 @@ function esc(s) {
 const OS_ICON = { windows: "🪟", macos: "🍎", linux: "🐧", android: "📱", ios: "🍏" };
 
 function engineBadge(engine) {
-  const chromium = engine === "chromium";
-  return `<span class="badge engine ${chromium ? "chromium" : "camoufox"}" title="${chromium ? "Chromium engine" : "Camoufox (Firefox) engine"}">${chromium ? "🌐 Chromium" : "🦊 Camoufox"}</span>`;
+  const meta = {
+    chromium: { cls: "chromium", label: "🌐 Chromium", title: "Chromium engine" },
+    android: { cls: "android", label: "🤖 Android", title: "Real Android device (AVD emulator)" },
+  }[engine] || { cls: "camoufox", label: "🦊 Camoufox", title: "Camoufox (Firefox) engine" };
+  return `<span class="badge engine ${meta.cls}" title="${meta.title}">${meta.label}</span>`;
 }
 
 // ------------------------------------------------------------- render list ---
@@ -134,7 +137,13 @@ $("#profiles-body").addEventListener("click", async (e) => {
     }
     loadProfiles();
   } catch (err) {
-    toast(err.message, "err");
+    // A real-Android launch fails until the SDK is installed — route to setup.
+    if (act === "start" && /Android engine isn't installed/i.test(err.message)) {
+      toast("Install the Android engine first", "err");
+      openAndroid();
+    } else {
+      toast(err.message, "err");
+    }
     loadProfiles();
   }
 });
@@ -142,9 +151,12 @@ $("#profiles-body").addEventListener("click", async (e) => {
 // ------------------------------------------------------------------- editor ---
 function updateEngineHint() {
   const engine = $("#f-engine").value;
-  $("#engine-hint").textContent = engine === "chromium"
-    ? "Chromium: best site compatibility, and phone profiles get a true mobile interface (real viewport, touch, DPR). Slightly less stealthy than Camoufox."
-    : "Camoufox: patched Firefox with native-level fingerprint spoofing — the strongest stealth. Phone profiles are emulated at the browser level.";
+  const hints = {
+    chromium: "Chromium: best site compatibility, and phone profiles get a true mobile interface (real viewport, touch, DPR). Slightly less stealthy than Camoufox.",
+    android: "Android: boots a real Android device in the official emulator — a genuine Chrome-for-Android engine, not a spoof. Needs a one-click SDK install (a few GB) and boots in 20–60s. One running device per profile.",
+    camoufox: "Camoufox: patched Firefox with native-level fingerprint spoofing — the strongest stealth. Phone profiles are emulated at the browser level.",
+  };
+  $("#engine-hint").textContent = hints[engine] || hints.camoufox;
 }
 $("#f-engine").addEventListener("change", updateEngineHint);
 
@@ -439,9 +451,11 @@ $("#bulk-create").addEventListener("click", async () => {
 });
 
 // --------------------------------------------------------------- new phone ---
-// One-click phone profiles (Multilogin-style): pick a device, and it's created on
-// the Chromium engine so it launches as a real phone (mobile viewport/touch/DPR).
+// One-click phone profiles (Multilogin-style). Two modes:
+//   emulated — Chromium with a mobile fingerprint (instant, unlimited).
+//   android  — a real Android device in the official emulator (genuine engine).
 let deviceCatalog = null;   // cached [{name, os, screen, dpr}]
+let phoneMode = "emulated";
 
 async function loadDevices() {
   if (deviceCatalog) return deviceCatalog;
@@ -452,29 +466,46 @@ async function loadDevices() {
 
 function osLabel(os) { return os === "ios" ? "🍏 iPhone" : "📱 Android"; }
 
+function fillPhoneDevices() {
+  const sel = $("#phone-device");
+  const devices = deviceCatalog || [];
+  // Real Android can only be an Android device — you can't boot an iPhone in an AVD.
+  const allowed = phoneMode === "android" ? ["android"] : ["android", "ios"];
+  const groups = {};
+  devices.forEach((d) => { if (allowed.includes(d.os)) (groups[d.os] || (groups[d.os] = [])).push(d); });
+  let html = "";
+  for (const os of ["android", "ios"]) {
+    if (!groups[os] || !groups[os].length) continue;
+    html += `<optgroup label="${osLabel(os)}">`;
+    html += groups[os].map((d) => `<option value="${esc(d.name)}">${esc(d.name)} · ${esc(d.screen)} · DPR ${d.dpr}</option>`).join("");
+    html += `</optgroup>`;
+  }
+  sel.innerHTML = html || `<option value="">No devices</option>`;
+  updatePhoneInfo();
+}
+
+function setPhoneMode(mode) {
+  phoneMode = mode;
+  $$("#phone-mode .seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $("#phone-mode-hint").textContent = mode === "android"
+    ? "Real Android: boots a genuine Android device (Chrome-for-Android) in the official emulator. Free, but needs a one-click SDK install (a few GB) and boots in 20–60s. One device per profile."
+    : "Emulated: Chromium wearing a mobile fingerprint — a phone-shaped window, mobile viewport, touch and DPR. Instant, unlimited profiles.";
+  $("#phone-launch").textContent = mode === "android" ? "Create & boot" : "Create & launch";
+  if (deviceCatalog) fillPhoneDevices();
+}
+
 async function openPhone() {
   $("#phone-name").value = "";
   $("#phone-url").value = "";
   $("#phone-device-info").textContent = "";
-  const sel = $("#phone-device");
-  sel.innerHTML = `<option value="">Loading devices…</option>`;
+  $("#phone-device").innerHTML = `<option value="">Loading devices…</option>`;
+  setPhoneMode("emulated");
   $("#phone-modal").classList.remove("hidden");
   try {
-    const devices = await loadDevices();
-    // Group by OS: Android first (strongest spoof), then iPhone.
-    const groups = { android: [], ios: [] };
-    devices.forEach((d) => (groups[d.os] || (groups[d.os] = [])).push(d));
-    let html = "";
-    for (const os of ["android", "ios"]) {
-      if (!groups[os] || !groups[os].length) continue;
-      html += `<optgroup label="${osLabel(os)}">`;
-      html += groups[os].map((d) => `<option value="${esc(d.name)}">${esc(d.name)} · ${esc(d.screen)} · DPR ${d.dpr}</option>`).join("");
-      html += `</optgroup>`;
-    }
-    sel.innerHTML = html;
-    updatePhoneInfo();
+    await loadDevices();
+    fillPhoneDevices();
   } catch (e) {
-    sel.innerHTML = `<option value="">Failed to load: ${esc(e.message)}</option>`;
+    $("#phone-device").innerHTML = `<option value="">Failed to load: ${esc(e.message)}</option>`;
   }
 }
 
@@ -483,11 +514,16 @@ function updatePhoneInfo() {
   const d = (deviceCatalog || []).find((x) => x.name === name);
   const info = $("#phone-device-info");
   if (!d) { info.textContent = ""; return; }
+  if (phoneMode === "android") {
+    info.innerHTML = `<span class="chip ok">Real Android · Chrome-for-Android</span><span class="chip">${esc(d.screen)}</span><span class="chip">not a spoof — genuine engine</span>`;
+    return;
+  }
   info.innerHTML = d.os === "ios"
     ? `<span class="chip">iPhone · Safari surface</span><span class="chip">${esc(d.screen)} @ ${d.dpr}x</span><span class="chip warn">iOS is a weaker spoof than Android</span>`
     : `<span class="chip ok">Android · Chrome</span><span class="chip">${esc(d.screen)} @ ${d.dpr}x</span>`;
 }
 $("#phone-device").addEventListener("change", updatePhoneInfo);
+$$("#phone-mode .seg-btn").forEach((b) => b.addEventListener("click", () => setPhoneMode(b.dataset.mode)));
 
 async function createPhone(launch) {
   const name = $("#phone-name").value.trim();
@@ -495,15 +531,27 @@ async function createPhone(launch) {
   if (!name) return toast("Name is required", "err");
   if (!device) return toast("Pick a device", "err");
   const d = (deviceCatalog || []).find((x) => x.name === device);
+  const android = phoneMode === "android";
+
+  // A real-Android launch needs the SDK installed first. Gate it before we create.
+  if (android && launch) {
+    const st = await api("/api/android/status");
+    if (!st.ready) {
+      $("#phone-modal").classList.add("hidden");
+      toast("Install the Android engine first", "err");
+      return openAndroid();
+    }
+  }
+
   const btn = launch ? $("#phone-launch") : $("#phone-create");
   const label = btn.textContent;
-  btn.disabled = true; btn.textContent = launch ? "Creating…" : "Creating…";
+  btn.disabled = true; btn.textContent = "Creating…";
   try {
     const created = await api("/api/profiles", {
       method: "POST",
       body: JSON.stringify({
         name,
-        engine: "chromium",         // Chromium = real phone rendering
+        engine: android ? "android" : "chromium",
         os: d ? d.os : "android",
         device,
         start_url: $("#phone-url").value.trim() || "about:blank",
@@ -511,11 +559,11 @@ async function createPhone(launch) {
     });
     $("#phone-modal").classList.add("hidden");
     if (launch) {
-      btn.textContent = "Launching…";
+      btn.textContent = android ? "Booting…" : "Launching…";
       const r = await api(`/api/profiles/${created.id}/start`, { method: "POST" });
-      toast(r.proxy ? `Phone launched · ${r.proxy}` : "Phone launched 📱");
+      toast(r.proxy ? `Phone launched · ${r.proxy}` : (android ? "Android device booted 🤖" : "Phone launched 📱"));
     } else {
-      toast("Phone profile created 📱");
+      toast(android ? "Android phone profile created 🤖" : "Phone profile created 📱");
     }
     loadProfiles();
   } catch (e) {
@@ -530,6 +578,69 @@ $("#phone-close").addEventListener("click", () => $("#phone-modal").classList.ad
 $("#phone-cancel").addEventListener("click", () => $("#phone-modal").classList.add("hidden"));
 $("#phone-create").addEventListener("click", () => createPhone(false));
 $("#phone-launch").addEventListener("click", () => createPhone(true));
+
+// ----------------------------------------------------------- android setup ---
+let androidPoll = null;
+
+function renderAndroidStatus(st) {
+  const box = $("#android-status-box");
+  if (st.ready) {
+    box.className = "android-status ok";
+    box.innerHTML = "✅ Android engine is installed and ready. New real-Android phone profiles will boot a genuine device.";
+    $("#android-install").textContent = "Reinstall";
+  } else {
+    box.className = "android-status warn";
+    const bits = [];
+    bits.push(st.java ? "Java ✓" : "Java ✗ (a small runtime will be fetched)");
+    bits.push("SDK tools " + (st.components.adb && st.components.emulator ? "✓" : "✗"));
+    bits.push("system image " + (st.system_image ? "✓" : "✗"));
+    box.innerHTML = "Not installed yet. One-click setup will fetch: <strong>" + bits.join(" · ") + "</strong>.";
+    $("#android-install").textContent = "Install Android engine";
+  }
+}
+
+async function openAndroid() {
+  $("#android-modal").classList.remove("hidden");
+  $("#android-log").classList.add("hidden-block");
+  $("#android-status-box").textContent = "Checking…";
+  try { renderAndroidStatus(await api("/api/android/status")); }
+  catch (e) { $("#android-status-box").textContent = "Status check failed: " + e.message; }
+  // If an install is already running (e.g. reopened modal), resume polling.
+  const ins = await api("/api/android/install/status");
+  if (ins.running) startAndroidPoll();
+}
+
+function startAndroidPoll() {
+  const log = $("#android-log");
+  log.classList.remove("hidden-block");
+  $("#android-install").disabled = true;
+  $("#android-install").textContent = "Installing…";
+  clearInterval(androidPoll);
+  androidPoll = setInterval(async () => {
+    let s;
+    try { s = await api("/api/android/install/status"); } catch { return; }
+    log.textContent = (s.lines || []).join("\n");
+    log.scrollTop = log.scrollHeight;
+    if (!s.running) {
+      clearInterval(androidPoll);
+      $("#android-install").disabled = false;
+      if (s.error) { toast("Install failed: " + s.error, "err"); }
+      else if (s.done) { toast("Android engine ready 🤖"); }
+      renderAndroidStatus(await api("/api/android/status"));
+    }
+  }, 1200);
+}
+
+async function installAndroid() {
+  try {
+    await api("/api/android/install", { method: "POST" });
+    startAndroidPoll();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+$("#android-install").addEventListener("click", installAndroid);
+$("#android-close").addEventListener("click", () => { $("#android-modal").classList.add("hidden"); clearInterval(androidPoll); });
+$("#android-cancel").addEventListener("click", () => { $("#android-modal").classList.add("hidden"); clearInterval(androidPoll); });
 
 // ------------------------------------------------------------------ cookies ---
 let cookieProfileId = null;
