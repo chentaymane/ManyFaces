@@ -53,6 +53,25 @@ def normalize_start_url(url: str | None) -> str:
     return "https://" + url
 
 
+def mobile_start_url() -> str:
+    """file:// URL of the built-in phone start page (search box + quick links).
+
+    A phone opened on about:blank looks like a black/blank screen — and in the
+    chromeless emulator window there's no address bar to escape it. We land phones
+    on this page instead, so there's always something to see and a way to navigate.
+    """
+    page = config.WEB_DIR / "mobile_start.html"
+    return page.as_uri() if page.exists() else "about:blank"
+
+
+def effective_start_url(profile: Profile, fp) -> str:
+    """Resolve the URL a session should open, upgrading a blank phone to the start page."""
+    url = normalize_start_url(profile.start_url)
+    if url == "about:blank" and getattr(fp, "is_mobile", False):
+        return mobile_start_url()
+    return url
+
+
 def activate_bundled_engine() -> bool:
     """If the app ships a bundled browser, make Camoufox use it without downloading.
 
@@ -343,6 +362,41 @@ def chromium_init_script(fp) -> str:
     }};
   }}
 }})();
+{_mobile_nav_script() if getattr(fp, "is_mobile", False) else ""}
+"""
+
+
+def _mobile_nav_script() -> str:
+    """Floating back/forward buttons for the chromeless phone (app-mode) window.
+
+    The emulator window has no toolbar, so without this a user can't go back — the
+    recurring "i cant go back" bug. We inject a tiny control in a shadow root (so page
+    CSS can't touch it) and re-add it on every navigation / DOM replacement.
+    """
+    return """
+(() => {
+  if (window.top !== window) return;               // top frame only
+  const ID = '__mf_nav';
+  const add = () => {
+    if (document.getElementById(ID) || !document.documentElement) return;
+    const host = document.createElement('div');
+    host.id = ID;
+    host.style.cssText = 'position:fixed;left:9px;bottom:11px;z-index:2147483647;';
+    const r = host.attachShadow({ mode: 'open' });
+    r.innerHTML =
+      '<style>.row{display:flex;gap:8px}button{width:42px;height:42px;border-radius:50%;' +
+      'border:none;background:rgba(20,22,28,.6);color:#fff;font-size:24px;line-height:40px;' +
+      'padding:0;box-shadow:0 2px 10px rgba(0,0,0,.45);cursor:pointer}' +
+      'button:active{transform:scale(.9)}</style>' +
+      '<div class="row"><button id="b">\\u2039</button><button id="f">\\u203a</button></div>';
+    r.getElementById('b').onclick = () => history.back();
+    r.getElementById('f').onclick = () => history.forward();
+    document.documentElement.appendChild(host);
+  };
+  const boot = () => { add(); new MutationObserver(add).observe(document.documentElement, { childList: true }); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
 """
 
 
@@ -495,7 +549,7 @@ class BrowserSession:
 
             page = context.pages[0] if context.pages else context.new_page()
             try:
-                page.goto(normalize_start_url(self.profile.start_url), wait_until="domcontentloaded")
+                page.goto(effective_start_url(self.profile, fp), wait_until="domcontentloaded")
             except Exception:  # noqa: BLE001 - navigation failure shouldn't close the window
                 pass
 
@@ -525,7 +579,8 @@ class BrowserSession:
 
             page = browser.pages[0] if getattr(browser, "pages", None) else browser.new_page()
             try:
-                page.goto(normalize_start_url(self.profile.start_url), wait_until="domcontentloaded")
+                fp = self.profile.fingerprint.to_fingerprint()
+                page.goto(effective_start_url(self.profile, fp), wait_until="domcontentloaded")
             except Exception:  # noqa: BLE001 - navigation failure shouldn't close the window
                 pass
 

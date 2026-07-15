@@ -52,8 +52,11 @@ Those uses are illegal in many jurisdictions and are not supported.
   a coherent per-device fingerprint (UA, screen, GPU strings, touch) pinned across
   launches. The window opens like a **phone emulator**: a chromeless, phone-shaped
   portrait window (no tabs or address bar — just the screen) sized to the exact
-  device resolution. Back/forward still work via `Alt`+`←`/`→` or the mouse back
-  button. On the **Camoufox** engine, phones instead run a coherent
+  device resolution. It lands on a built-in **phone home screen** (clock, a
+  search/address box, and quick-launch app icons) instead of a blank page, and every
+  page shows floating on-screen **‹ › back/forward buttons** — so there's always
+  something to see and a way to navigate (`Alt`+`←`/`→` and the mouse back button
+  work too). On the **Camoufox** engine, phones instead run a coherent
   Firefox-for-Android identity (mobile UA, phone screen + DPR, `Linux armv8l`
   platform, mobile GPU strings, Android-only font set). iPhone is offered on both,
   but is a weaker spoof than Android (an iPhone runs WebKit while both engines are
