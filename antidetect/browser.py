@@ -381,8 +381,14 @@ def build_chromium_options(profile: Profile, pw) -> dict[str, Any]:
             "is_mobile": True,
             "has_touch": True,
         })
-        # Size the OS window to the phone (plus room for the toolbar).
-        args.append(f"--window-size={w},{h + 130}")
+        # Emulator look: Chromium "app mode" opens a chromeless window — no tabs, no
+        # address bar, just the page — sized to the exact phone screen. That turns the
+        # launched window into a phone-shaped screen rather than a narrow desktop
+        # browser. We open it on about:blank so our fingerprint init-script and cookies
+        # are injected *before* the real navigation (see _run_chromium). Back/forward
+        # still work via Alt+←/→ and the mouse back button.
+        args.append("--app=about:blank")
+        args.append(f"--window-size={w},{h}")
     else:
         # Desktop: let the real window drive the viewport; pin its size.
         opts["no_viewport"] = True

@@ -41,7 +41,10 @@ Those uses are illegal in many jurisdictions and are not supported.
   launch**. Phone profiles default to the **Chromium** engine, which renders them as
   a true phone — real mobile viewport, high DPR, touch, and mobile page layout — with
   a coherent per-device fingerprint (UA, screen, GPU strings, touch) pinned across
-  launches. On the **Camoufox** engine, phones instead run a coherent
+  launches. The window opens like a **phone emulator**: a chromeless, phone-shaped
+  portrait window (no tabs or address bar — just the screen) sized to the exact
+  device resolution. Back/forward still work via `Alt`+`←`/`→` or the mouse back
+  button. On the **Camoufox** engine, phones instead run a coherent
   Firefox-for-Android identity (mobile UA, phone screen + DPR, `Linux armv8l`
   platform, mobile GPU strings, Android-only font set). iPhone is offered on both,
   but is a weaker spoof than Android (an iPhone runs WebKit while both engines are
