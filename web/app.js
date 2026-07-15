@@ -584,9 +584,14 @@ let androidPoll = null;
 
 function renderAndroidStatus(st) {
   const box = $("#android-status-box");
+  // Hardware-acceleration warning: the usual cause of a black screen on boot.
+  let accelNote = "";
+  if (st.accel && st.accel.ok === false) {
+    accelNote = `<div class="android-accel-warn">⚠ Hardware acceleration unavailable — the emulator will run in software mode (slow, but avoids a black screen). To speed it up, enable <strong>Windows Hypervisor Platform</strong> in “Turn Windows features on or off”.${st.accel.detail ? "<br><span class='mono'>" + esc(st.accel.detail) + "</span>" : ""}</div>`;
+  }
   if (st.ready) {
     box.className = "android-status ok";
-    box.innerHTML = "✅ Android engine is installed and ready. New real-Android phone profiles will boot a genuine device.";
+    box.innerHTML = "✅ Android engine is installed and ready. New real-Android phone profiles will boot a genuine device." + accelNote;
     $("#android-install").textContent = "Reinstall";
   } else {
     box.className = "android-status warn";
@@ -594,7 +599,7 @@ function renderAndroidStatus(st) {
     bits.push(st.java ? "Java ✓" : "Java ✗ (a small runtime will be fetched)");
     bits.push("SDK tools " + (st.components.adb && st.components.emulator ? "✓" : "✗"));
     bits.push("system image " + (st.system_image ? "✓" : "✗"));
-    box.innerHTML = "Not installed yet. One-click setup will fetch: <strong>" + bits.join(" · ") + "</strong>.";
+    box.innerHTML = "Not installed yet. One-click setup will fetch: <strong>" + bits.join(" · ") + "</strong>." + accelNote;
     $("#android-install").textContent = "Install Android engine";
   }
 }

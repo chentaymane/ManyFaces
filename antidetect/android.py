@@ -54,6 +54,11 @@ _JRE = {
 # is smaller. Overridable so users can pick an API level / variant.
 SYSTEM_IMAGE = os.environ.get("ANTIDETECT_ANDROID_IMAGE", "system-images;android-34;google_apis_playstore;x86_64")
 _ANDROID_API_PKGS = ["platform-tools", "emulator", SYSTEM_IMAGE]
+# GPU rendering mode. `auto` (the emulator default) very often renders a permanent
+# BLACK SCREEN on Windows — host-GPU/driver mismatch, Hyper-V, or a remote session.
+# `swiftshader_indirect` is software rendering: slower but it always draws, so it's
+# the reliable default. Override with ANTIDETECT_ANDROID_GPU=host for GPU accel.
+ANDROID_GPU = os.environ.get("ANTIDETECT_ANDROID_GPU", "swiftshader_indirect")
 
 _IS_WIN = platform.system() == "Windows"
 
@@ -156,6 +161,25 @@ def _tool_env() -> dict[str, str]:
 
 
 # --- Status -------------------------------------------------------------------
+def accel_check() -> dict[str, Any]:
+    """Ask the emulator whether hardware acceleration is available.
+
+    A black-screen / never-boots emulator is very often missing accel. `emulator
+    -accel-check` reports it without booting anything. Returns {ok, detail}.
+    """
+    emu = tool_paths()["emulator"]
+    if not emu.exists():
+        return {"ok": None, "detail": "emulator not installed yet"}
+    try:
+        out = subprocess.run([str(emu), "-accel-check"], capture_output=True, text=True,
+                             timeout=25, env=_tool_env(),
+                             creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0))
+        text = ((out.stdout or "") + (out.stderr or "")).strip()
+        return {"ok": out.returncode == 0, "detail": text.splitlines()[-1] if text else ""}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": None, "detail": str(exc)}
+
+
 def status() -> dict[str, Any]:
     """Report what's installed so the UI can decide: setup screen vs ready."""
     tp = tool_paths()
@@ -172,6 +196,8 @@ def status() -> dict[str, Any]:
         "system_image": img_ok,
         "sdk_root": str(sdk_root()),
         "image_pkg": SYSTEM_IMAGE,
+        "gpu_mode": ANDROID_GPU,
+        "accel": accel_check() if comps["emulator"] else {"ok": None, "detail": ""},
     }
 
 
@@ -414,6 +440,8 @@ class AndroidSession:
         self.serial: Optional[str] = None
         self.error: Optional[str] = None
         self._log: list[str] = []
+        self._logf = None
+        self.boot_log_path: Optional[Path] = None
 
     def log(self, m: str) -> None:
         self._log.append(m)
@@ -422,22 +450,38 @@ class AndroidSession:
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
+    def _log_tail(self, n: int = 25) -> str:
+        try:
+            if self.boot_log_path and self.boot_log_path.exists():
+                lines = self.boot_log_path.read_text(errors="replace").splitlines()
+                return "\n".join(lines[-n:])
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
     def start(self, start_url: str) -> None:
         name = ensure_avd(self.profile, self.log)
         port = _free_port()
         self.serial = f"emulator-{port}"
         tp = tool_paths()
+        # -gpu swiftshader_indirect  → software render, the fix for black screens.
+        # -no-snapshot               → always cold-boot (a bad snapshot also blackscreens).
+        # -no-audio                  → avoids audio-backend hangs on headless/VM hosts.
         args = [str(tp["emulator"]), "@" + name, "-port", str(port),
-                "-no-snapshot-save", "-no-boot-anim", "-netdelay", "none",
-                "-netspeed", "full"]
+                "-gpu", ANDROID_GPU, "-no-snapshot", "-no-boot-anim", "-no-audio",
+                "-netdelay", "none", "-netspeed", "full"]
         proxy = self.profile.proxy
         if proxy.is_set and proxy.type in ("http", "https"):
             # The emulator only takes an unauthenticated HTTP proxy on the cmdline.
             args += ["-http-proxy", f"{proxy.host}:{proxy.port}"]
         self.log("$ " + " ".join(Path(a).name if os.sep in a else a for a in args))
+        # Capture the emulator's own output — without it a failed boot is undiagnosable.
+        avd_home().mkdir(parents=True, exist_ok=True)
+        self.boot_log_path = avd_home() / f"{name}.boot.log"
+        self._logf = open(self.boot_log_path, "w", encoding="utf-8", errors="replace")
         self.proc = subprocess.Popen(
             args, env=_tool_env(),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=self._logf, stderr=subprocess.STDOUT,
             creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0),
         )
         self._wait_boot()
@@ -450,7 +494,7 @@ class AndroidSession:
             creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0),
         )
 
-    def _wait_boot(self, timeout: int = 240) -> None:
+    def _wait_boot(self, timeout: int = 300) -> None:
         deadline = time.time() + timeout
         # First wait for the device to appear on adb, then for full boot.
         try:
@@ -461,7 +505,13 @@ class AndroidSession:
             pass
         while time.time() < deadline:
             if not self.running:
-                raise RuntimeError("Emulator process exited during boot (virtualization/WHPX issue?).")
+                tail = self._log_tail()
+                raise RuntimeError(
+                    "The Android emulator process exited during boot — usually missing "
+                    "hardware acceleration (enable 'Windows Hypervisor Platform' in "
+                    "Windows Features) or a broken system image."
+                    + (f"\n\nEmulator log:\n{tail}" if tail else "")
+                )
             try:
                 out = self._adb("shell", "getprop", "sys.boot_completed", timeout=10).stdout.strip()
                 if out == "1":
@@ -469,7 +519,13 @@ class AndroidSession:
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(2)
-        raise RuntimeError("Android did not finish booting in time.")
+        tail = self._log_tail()
+        raise RuntimeError(
+            "Android didn't finish booting in time (a black screen that never clears is "
+            "usually the GPU mode — this build already forces software rendering; if it "
+            "persists, hardware acceleration/WHPX is likely unavailable)."
+            + (f"\n\nEmulator log:\n{tail}" if tail else "")
+        )
 
     def _open_url(self, url: str) -> None:
         if not url or url == "about:blank":
@@ -498,6 +554,11 @@ class AndroidSession:
                     self.proc.kill()
                 except Exception:  # noqa: BLE001
                     pass
+        if self._logf:
+            try:
+                self._logf.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class AndroidManager:
