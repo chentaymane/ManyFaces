@@ -466,9 +466,40 @@ def _avd_exists(name: str) -> bool:
     return (avd_home() / f"{name}.avd").exists() and (avd_home() / f"{name}.ini").exists()
 
 
+# Data-partition size for a fresh AVD. The emulator's default is ~7.4 GB, which fails
+# to even start on a tight disk ("Not enough space to create userdata partition").
+# A browser profile needs far less; ~4.5 GB is plenty and roughly halves the footprint.
+DATA_PARTITION = os.environ.get("ANTIDETECT_ANDROID_DATA_MB", "4608") + "M"
+
+
+def _cap_data_partition(name: str) -> None:
+    """Pin `disk.dataPartition.size` in the AVD config so it doesn't demand ~7.4 GB.
+
+    Safe to call before first boot (no userdata.img yet). We don't shrink an AVD that
+    has already created its userdata — only ensure the property is present.
+    """
+    cfg = avd_home() / f"{name}.avd" / "config.ini"
+    if not cfg.exists():
+        return
+    try:
+        lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:  # noqa: BLE001
+        return
+    lines = [ln for ln in lines if not ln.startswith("disk.dataPartition.size")]
+    lines.append(f"disk.dataPartition.size={DATA_PARTITION}")
+    try:
+        cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def ensure_avd(profile, log: Callable[[str], None]) -> str:
     name = _avd_name(profile.id)
     if _avd_exists(name):
+        # Cap the partition on the config in case this AVD predates the cap and hasn't
+        # booted yet (harmless if userdata already exists).
+        if not (avd_home() / f"{name}.avd" / "userdata.img").exists():
+            _cap_data_partition(name)
         return name
     device = "pixel_6"
     try:
@@ -481,7 +512,25 @@ def ensure_avd(profile, log: Callable[[str], None]) -> str:
                "-d", device, "--force"], log, input_text="no\n", timeout=180)
     if rc != 0 or not _avd_exists(name):
         raise RuntimeError(f"Failed to create AVD (code {rc}).")
+    _cap_data_partition(name)
     return name
+
+
+def delete_avd(profile_id: str) -> None:
+    """Remove a profile's AVD (dir + .ini + logs) so deleted profiles don't leak GBs.
+
+    Each AVD is ~3–4 GB; without this, deleting a profile orphaned its whole device.
+    """
+    name = _avd_name(profile_id)
+    home = avd_home()
+    for path in (home / f"{name}.avd", home / f"{name}.ini", home / f"{name}.boot.log"):
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.exists():
+                path.unlink()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class AndroidSession:
@@ -596,22 +645,12 @@ class AndroidSession:
 
     def _wait_boot(self, timeout: int = 300) -> None:
         deadline = time.time() + timeout
-        # First wait for the device to appear on adb, then for full boot.
-        try:
-            subprocess.run([str(tool_paths()["adb"]), "-s", self.serial or "", "wait-for-device"],
-                           env=_tool_env(), timeout=timeout,
-                           creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0))
-        except Exception:  # noqa: BLE001
-            pass
+        # Poll directly (no blocking `wait-for-device`, which would hang the full
+        # timeout if the emulator dies at startup). Each loop re-checks the process so a
+        # crash — e.g. "not enough disk space" — fails in ~2s, not minutes.
         while time.time() < deadline:
             if not self.running:
-                tail = self._log_tail()
-                raise RuntimeError(
-                    "The Android emulator process exited during boot — usually missing "
-                    "hardware acceleration (enable 'Windows Hypervisor Platform' in "
-                    "Windows Features) or a broken system image."
-                    + (f"\n\nEmulator log:\n{tail}" if tail else "")
-                )
+                raise RuntimeError(self._boot_failure_reason())
             try:
                 out = self._adb("shell", "getprop", "sys.boot_completed", timeout=10).stdout.strip()
                 if out == "1":
@@ -620,13 +659,29 @@ class AndroidSession:
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(2)
-        tail = self._log_tail()
         raise RuntimeError(
             "Android didn't finish booting in time (a black screen that never clears is "
             "usually the GPU mode — this build already forces software rendering; if it "
             "persists, hardware acceleration/WHPX is likely unavailable)."
-            + (f"\n\nEmulator log:\n{tail}" if tail else "")
+            + self._log_block()
         )
+
+    def _log_block(self) -> str:
+        tail = self._log_tail()
+        return f"\n\nEmulator log:\n{tail}" if tail else ""
+
+    def _boot_failure_reason(self) -> str:
+        """Turn the emulator's exit into a specific, actionable message."""
+        tail = self._log_tail(40)
+        low = tail.lower()
+        if "not enough space" in low or "userdata partition" in low:
+            return ("Not enough free disk space to start the Android device. Free up a "
+                    "few GB on your system drive (each device needs ~4–5 GB), then try "
+                    "again." + self._log_block())
+        if "hax" in low or "whpx" in low or "hvf" in low or "kvm" in low or "acceleration" in low:
+            return ("The Android emulator couldn't get hardware acceleration. On Windows, "
+                    "enable 'Windows Hypervisor Platform' in Windows Features." + self._log_block())
+        return ("The Android emulator process exited during boot." + self._log_block())
 
     def _wait_settled(self, settle: float = 8.0) -> None:
         """`sys.boot_completed` fires while services are still coming up — launching an

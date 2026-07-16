@@ -411,6 +411,8 @@ def update_profile(profile_id: str, patch: ProfileUpdate) -> dict[str, Any]:
 def delete_profile(profile_id: str) -> None:
     manager.stop(profile_id)
     android_engine.manager.stop(profile_id)
+    # Reclaim the ~3–4 GB AVD too, so deleting a profile doesn't orphan its device.
+    android_engine.delete_avd(profile_id)
     if not db.delete(profile_id):
         raise HTTPException(404, "Profile not found")
 
