@@ -44,6 +44,14 @@ _CT = {
     "Darwin": os.environ.get("ANTIDETECT_CMDLINE_URL",
         "https://dl.google.com/android/repository/commandlinetools-mac-11076708_latest.zip"),
 }
+# scrcpy — mirrors the (headless) emulator in a reliable window with real touch input.
+# The Android emulator's own Qt window is black on many Windows machines (missing
+# opengl32sw / layered-window failures); scrcpy renders independently of it. Windows
+# build is a self-contained zip (bundles its own adb + dlls).
+_SCRCPY = {
+    "Windows": os.environ.get("ANTIDETECT_SCRCPY_URL",
+        "https://github.com/Genymobile/scrcpy/releases/download/v2.7/scrcpy-win64-v2.7.zip"),
+}
 # Portable JRE (Temurin 17) — fetched only when no system Java 17+ is present.
 _JRE = {
     "Windows": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jre_x64_windows_hotspot_17.0.12_7.zip",
@@ -78,6 +86,23 @@ def avd_home() -> Path:
 
 def jre_dir() -> Path:
     return _root() / "jre"
+
+
+def scrcpy_dir() -> Path:
+    return _root() / "scrcpy"
+
+
+def scrcpy_exe() -> Optional[Path]:
+    """Locate scrcpy.exe under the scrcpy dir (the zip has a versioned subfolder)."""
+    d = scrcpy_dir()
+    if not d.exists():
+        return None
+    direct = _bin(d, "scrcpy")
+    if direct.exists():
+        return direct
+    for p in d.rglob("scrcpy.exe" if _IS_WIN else "scrcpy"):
+        return p
+    return None
 
 
 def _bin(p: Path, name: str) -> Path:
@@ -197,6 +222,7 @@ def status() -> dict[str, Any]:
         "sdk_root": str(sdk_root()),
         "image_pkg": SYSTEM_IMAGE,
         "gpu_mode": ANDROID_GPU,
+        "scrcpy": bool(scrcpy_exe()),
         "accel": accel_check() if comps["emulator"] else {"ok": None, "detail": ""},
     }
 
@@ -341,6 +367,25 @@ def _ensure_cmdline_tools(log: Callable[[str], None]) -> None:
     log("✓ cmdline-tools installed")
 
 
+def _ensure_scrcpy(log: Callable[[str], None]) -> None:
+    if scrcpy_exe():
+        log("✓ scrcpy present")
+        return
+    url = _SCRCPY.get(platform.system())
+    if not url:
+        log("• scrcpy auto-download only on Windows; skipping (install scrcpy via your "
+            "package manager for the reliable mirror window)")
+        return
+    zpath = _root() / "scrcpy.zip"
+    _download(url, zpath, log)
+    _unzip(zpath, scrcpy_dir(), log)
+    zpath.unlink(missing_ok=True)
+    if scrcpy_exe():
+        log("✓ scrcpy installed")
+    else:
+        log("! scrcpy extracted but scrcpy.exe not found")
+
+
 def _do_install() -> None:
     log = install_state.log
     try:
@@ -361,6 +406,12 @@ def _do_install() -> None:
                   input_text="y\n" * 20, timeout=3600)
         if rc != 0:
             raise RuntimeError(f"sdkmanager exited with code {rc}")
+        # scrcpy: the reliable mirror window (the emulator's own window black-screens
+        # on many machines). Best-effort — a failure here doesn't block the engine.
+        try:
+            _ensure_scrcpy(log)
+        except Exception as exc:  # noqa: BLE001
+            log(f"! scrcpy install skipped: {exc}")
         st = status()
         if not st["ready"]:
             raise RuntimeError(f"Install finished but components missing: {st['components']}")
@@ -437,11 +488,13 @@ class AndroidSession:
     def __init__(self, profile) -> None:
         self.profile = profile
         self.proc: Optional[subprocess.Popen] = None
+        self.mirror: Optional[subprocess.Popen] = None   # scrcpy window
         self.serial: Optional[str] = None
         self.error: Optional[str] = None
         self._log: list[str] = []
         self._logf = None
         self.boot_log_path: Optional[Path] = None
+        self._stopping = False
 
     def log(self, m: str) -> None:
         self._log.append(m)
@@ -464,12 +517,21 @@ class AndroidSession:
         port = _free_port()
         self.serial = f"emulator-{port}"
         tp = tool_paths()
-        # -gpu swiftshader_indirect  → software render, the fix for black screens.
-        # -no-snapshot               → always cold-boot (a bad snapshot also blackscreens).
+        use_mirror = scrcpy_exe() is not None
+        # -gpu swiftshader_indirect  → software render (guest side).
+        # -no-snapshot               → always cold-boot (a bad snapshot can black-screen).
         # -no-audio                  → avoids audio-backend hangs on headless/VM hosts.
+        # -no-window                 → hide the emulator's own (black-screening) Qt window;
+        #                              scrcpy mirrors the device instead. Only when scrcpy
+        #                              is available, else fall back to the native window.
         args = [str(tp["emulator"]), "@" + name, "-port", str(port),
                 "-gpu", ANDROID_GPU, "-no-snapshot", "-no-boot-anim", "-no-audio",
+                # More RAM/cores → far fewer "system isn't responding" (ANR) stalls,
+                # which software rendering makes likely on a fresh cold boot.
+                "-memory", "3072", "-cores", "4",
                 "-netdelay", "none", "-netspeed", "full"]
+        if use_mirror:
+            args.append("-no-window")
         proxy = self.profile.proxy
         if proxy.is_set and proxy.type in ("http", "https"):
             # The emulator only takes an unauthenticated HTTP proxy on the cmdline.
@@ -486,6 +548,44 @@ class AndroidSession:
         )
         self._wait_boot()
         self._open_url(start_url)
+        if use_mirror:
+            self._start_mirror()
+
+    def _start_mirror(self) -> None:
+        """Open scrcpy — a reliable window mirroring the device, with real touch input."""
+        exe = scrcpy_exe()
+        if not exe:
+            return
+        title = getattr(self.profile, "name", "Android")
+        env = _tool_env()
+        # Point scrcpy at OUR adb so it talks to the same server the emulator registered on.
+        env["ADB"] = str(tool_paths()["adb"])
+        args = [str(exe), "-s", self.serial or "", "--window-title", f"📱 {title}",
+                "--stay-awake", "--no-audio", "--max-size", "1024"]
+        self.log("$ " + " ".join(Path(a).name if os.sep in a else a for a in args))
+        try:
+            self.mirror = subprocess.Popen(
+                args, env=env, cwd=str(exe.parent),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"! scrcpy failed to start: {exc}")
+            return
+        # When the user closes the mirror window, shut the (headless) device down too,
+        # so we never leak an invisible VM.
+        threading.Thread(target=self._watch_mirror, daemon=True,
+                         name=f"scrcpy-watch-{self.serial}").start()
+
+    def _watch_mirror(self) -> None:
+        if not self.mirror:
+            return
+        try:
+            self.mirror.wait()
+        except Exception:  # noqa: BLE001
+            return
+        if not self._stopping:
+            self.stop()
 
     def _adb(self, *a: str, timeout: int = 30) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -515,6 +615,7 @@ class AndroidSession:
             try:
                 out = self._adb("shell", "getprop", "sys.boot_completed", timeout=10).stdout.strip()
                 if out == "1":
+                    self._wait_settled()
                     return
             except Exception:  # noqa: BLE001
                 pass
@@ -527,17 +628,48 @@ class AndroidSession:
             + (f"\n\nEmulator log:\n{tail}" if tail else "")
         )
 
+    def _wait_settled(self, settle: float = 8.0) -> None:
+        """`sys.boot_completed` fires while services are still coming up — launching an
+        app right then causes "Process system isn't responding". Wait for the package
+        manager to answer, then let the system breathe."""
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            try:
+                out = self._adb("shell", "pm", "list", "packages", timeout=15).stdout
+                if "package:" in out:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(2)
+        time.sleep(settle)
+
     def _open_url(self, url: str) -> None:
         if not url or url == "about:blank":
             return
-        try:
-            # Generic VIEW intent → opens the image's default browser (Chrome on Play images).
-            self._adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
-                      "-d", url, timeout=20)
-        except Exception:  # noqa: BLE001
-            pass
+        # Retry: the browser package can still be warming up right after boot.
+        for attempt in range(3):
+            try:
+                # Generic VIEW intent → opens the image's default browser (Chrome on Play images).
+                r = self._adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
+                              "-d", url, timeout=20)
+                if "Error" not in (r.stderr or "") and "Error" not in (r.stdout or ""):
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(4)
 
     def stop(self) -> None:
+        self._stopping = True
+        # Close the mirror window first.
+        if self.mirror and self.mirror.poll() is None:
+            try:
+                self.mirror.terminate()
+                self.mirror.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                try:
+                    self.mirror.kill()
+                except Exception:  # noqa: BLE001
+                    pass
         try:
             if self.serial:
                 subprocess.run([str(tool_paths()["adb"]), "-s", self.serial, "emu", "kill"],

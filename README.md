@@ -5,11 +5,16 @@ Dolphin Anty / Multilogin / GoLogin. Each profile is a fully isolated browser
 identity: its own persistent storage and cookies, its own **coherent** fingerprint,
 and its own proxy.
 
-Built on **[Camoufox](https://camoufox.com/)** — a patched build of Firefox that
-spoofs fingerprints (canvas, WebGL, fonts, WebRTC, navigator, screen, audio) at the
-**native C++ level**. That is dramatically harder to detect than the JavaScript
-injection most DIY tools use, and it passes CreepJS, BrowserScan, Pixelscan and
-BrowserLeaks out of the box.
+The default engine is **[Camoufox](https://camoufox.com/)** — a patched build of
+Firefox that spoofs fingerprints (canvas, WebGL, fonts, WebRTC, navigator, screen,
+audio) at the **native C++ level**. That is dramatically harder to detect than the
+JavaScript injection most DIY tools use, and it passes CreepJS, BrowserScan,
+Pixelscan and BrowserLeaks out of the box.
+
+Each profile can instead run on **Chromium** (for sites that block Firefox, and for
+true mobile emulation) or on a **real Android device** in the official emulator (a
+genuine Chrome-for-Android engine — nothing spoofed, because it *is* a phone). All
+three are selectable per profile.
 
 ## Legitimate use
 
@@ -29,17 +34,25 @@ Those uses are illegal in many jurisdictions and are not supported.
   (a real device) on each profile. Chromium is for sites that block Firefox, and it
   renders phone profiles as a **true mobile interface** (real device viewport, high
   DPR, touch, mobile layout) — emulation Firefox/Gecko can't do. Fingerprints
-  (navigator, screen, WebGL GPU strings, touch) are pinned on both and stay identical
-  across launches; `navigator.webdriver` is hidden on Chromium too.
+  (navigator, screen, WebGL GPU strings, touch) are pinned on both Camoufox and
+  Chromium and stay identical across launches; `navigator.webdriver` is hidden on
+  Chromium too. (The Android engine is a real device, so there's nothing to pin.)
 - **Real Android engine (AVD)** — for a phone that isn't emulated at all: the
   **Android** engine boots a genuine Android device in the official Android Emulator,
   so the browser inside is real **Chrome-for-Android** (real ARM-ish Blink, real
   touch/GPU) — nothing spoofed, because it *is* a phone. It's free and set up in one
   click from the app: the installer fetches the Android SDK + a system image (a few
-  GB) and, if needed, a small Java runtime, streaming live progress. Requires
-  hardware virtualization (WHPX / KVM / Hypervisor.framework). Trade-off vs the
-  emulated engines: each profile is one booting Android VM (20–60s, real RAM/CPU), so
-  it's for authenticity, not running dozens at once.
+  GB), **scrcpy** (the mirror window), and, if needed, a small Java runtime, streaming
+  live progress. The device runs **headless** and is shown through the scrcpy mirror
+  — a clean window with real touch/keyboard input — which sidesteps the emulator's own
+  window (it black-screens on many PCs: a missing `opengl32sw` / layered-window bug in
+  the emulator's Qt UI, unrelated to the phone itself). Requires hardware
+  virtualization (WHPX / KVM / Hypervisor.framework). Trade-off vs the emulated
+  engines: each profile is one booting Android VM (cold boot ~1–4 min with software
+  rendering, real RAM/CPU), so it's for authenticity, not running dozens at once.
+  Proxy support is limited to an **unauthenticated HTTP/HTTPS** proxy (the emulator
+  can't take SOCKS or user/password proxies on its command line); such proxies apply
+  to the emulated engines but not to Android profiles.
 - **Desktop app** — runs in a native window (pywebview / WebView2), not a browser
   tab. `python desktop.py`.
 - **Profile management** — create, edit, clone, delete, and **bulk-create** N
@@ -108,6 +121,19 @@ python run.py
 **Or just double-click a launcher** (does step 3 for you):
 - **Windows:** `START.bat`
 - **Linux / macOS:** `./start.sh`  (first run: `chmod +x start.sh`)
+
+### Optional engines
+
+- **Chromium** — needed only for profiles set to the Chromium engine (including the
+  emulated phone profiles). Install the browser once:
+  ```bash
+  python -m playwright install chromium
+  ```
+- **Real Android** — no manual setup: pick the Android engine, then use the in-app
+  **one-click installer** on the Android setup screen. It fetches the Android SDK + a
+  system image (a few GB), the scrcpy mirror window, and a portable Java runtime if
+  your system Java is older than 17. Requires hardware virtualization (WHPX on
+  Windows, KVM on Linux, Hypervisor.framework on macOS).
 
 ### Optional: native desktop window instead of a browser tab
 
@@ -195,24 +221,31 @@ Async version: `antidetect.automate.launch_async`.
 ```
 run.py                 -> starts uvicorn + opens dashboard
 antidetect/
-  api.py               -> FastAPI: profile CRUD, launch, proxy test, cookies
-  browser.py           -> Camoufox session manager (threaded, headful)
+  api.py               -> FastAPI: profile CRUD, launch, proxy test, cookies, Android setup
+  browser.py           -> Camoufox + Chromium session manager (threaded, headful)
+  android.py           -> real Android (AVD) engine: SDK install, emulator boot, scrcpy mirror
   automate.py          -> scripting entry points (sync + async)
-  fingerprint.py       -> coherent fingerprint generation
+  fingerprint.py       -> coherent fingerprint generation (desktop + phone presets)
   proxy.py             -> proxy connectivity/geo testing
   cookies.py           -> cookie import/export/random
   models.py            -> Pydantic schemas
   db.py                -> SQLite profile storage
   config.py            -> paths & settings
-web/                   -> dashboard (vanilla JS)
+web/
+  index.html/app.js/style.css  -> dashboard (vanilla JS)
+  mobile_start.html            -> phone home screen served to emulated-phone profiles
 ```
 
 Profile metadata lives in SQLite (`~/.antidetect/antidetect.db`); persistent browser
-data lives on disk per profile.
+data lives on disk per profile. The Android SDK, AVDs, and scrcpy live under
+`~/.antidetect/android/`.
 
 ## Roadmap toward parity with commercial tools
 
 - Full BrowserForge fingerprint serialization (pin every attribute, not just core).
+- Authenticated / SOCKS proxy support for the real-Android engine (via a local
+  forwarding proxy, since the emulator only takes an unauthenticated HTTP proxy).
+- GPU-mode selector for the Android engine (software / host / auto) in the setup UI.
 - Team features: multi-user, roles, shared/encrypted proxy pool.
 - Profile "warm-up" automation and cookie robot.
 - Fingerprint quality scoring against CreepJS/Pixelscan in-app.

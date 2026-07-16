@@ -591,8 +591,11 @@ function renderAndroidStatus(st) {
   }
   if (st.ready) {
     box.className = "android-status ok";
-    box.innerHTML = "✅ Android engine is installed and ready. New real-Android phone profiles will boot a genuine device." + accelNote;
-    $("#android-install").textContent = "Reinstall";
+    const mirror = st.scrcpy
+      ? "It opens in a clean <strong>mirror window</strong> (scrcpy) with real touch input."
+      : "⚠ The mirror window (scrcpy) isn't installed — click Reinstall to add it, otherwise the emulator's own window may show black.";
+    box.innerHTML = "✅ Android engine is installed and ready. New real-Android phone profiles boot a genuine device. " + mirror + accelNote;
+    $("#android-install").textContent = st.scrcpy ? "Reinstall" : "Add mirror window";
   } else {
     box.className = "android-status warn";
     const bits = [];
