@@ -47,9 +47,11 @@ Those uses are illegal in many jurisdictions and are not supported.
   — a clean window with real touch/keyboard input — which sidesteps the emulator's own
   window (it black-screens on many PCs: a missing `opengl32sw` / layered-window bug in
   the emulator's Qt UI, unrelated to the phone itself). Requires hardware
-  virtualization (WHPX / KVM / Hypervisor.framework). Trade-off vs the emulated
-  engines: each profile is one booting Android VM (cold boot ~1–4 min with software
-  rendering, real RAM/CPU), so it's for authenticity, not running dozens at once.
+  virtualization (WHPX / KVM / Hypervisor.framework) and uses **hardware GPU**
+  rendering for speed. The first boot of a device takes ~1–2 min; after that it
+  **quickboots in seconds** (a snapshot is saved on close and restored next launch).
+  Trade-off vs the emulated engines: each profile is one Android VM (real RAM/CPU,
+  ~4–5 GB disk), so it's for authenticity, not running dozens at once.
   Proxy support is limited to an **unauthenticated HTTP/HTTPS** proxy (the emulator
   can't take SOCKS or user/password proxies on its command line); such proxies apply
   to the emulated engines but not to Android profiles.

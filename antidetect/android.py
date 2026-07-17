@@ -62,11 +62,20 @@ _JRE = {
 # is smaller. Overridable so users can pick an API level / variant.
 SYSTEM_IMAGE = os.environ.get("ANTIDETECT_ANDROID_IMAGE", "system-images;android-34;google_apis_playstore;x86_64")
 _ANDROID_API_PKGS = ["platform-tools", "emulator", SYSTEM_IMAGE]
-# GPU rendering mode. `auto` (the emulator default) very often renders a permanent
-# BLACK SCREEN on Windows — host-GPU/driver mismatch, Hyper-V, or a remote session.
-# `swiftshader_indirect` is software rendering: slower but it always draws, so it's
-# the reliable default. Override with ANTIDETECT_ANDROID_GPU=host for GPU accel.
-ANDROID_GPU = os.environ.get("ANTIDETECT_ANDROID_GPU", "swiftshader_indirect")
+# GPU rendering mode. We run headless + mirror with scrcpy, so the emulator's own
+# (black-screening) window is never shown — which means we can safely use HARDWARE
+# rendering (`host`) for a huge speed-up over software (`swiftshader_indirect`). The
+# old black screen was that hidden window, not the guest GPU. Fall back to software
+# only if host rendering misbehaves: ANTIDETECT_ANDROID_GPU=swiftshader_indirect.
+ANDROID_GPU = os.environ.get("ANTIDETECT_ANDROID_GPU", "host")
+# Guest RAM (MB) and CPU cores. Kept modest so an 8 GB host doesn't swap (swapping is
+# a massive lag source). Override for beefier machines: ANTIDETECT_ANDROID_MEMORY.
+ANDROID_MEMORY = os.environ.get("ANTIDETECT_ANDROID_MEMORY", "2048")
+ANDROID_CORES = os.environ.get("ANTIDETECT_ANDROID_CORES", "4")
+# Quickboot: save a snapshot on exit and restore it next launch, so only the FIRST
+# boot pays the full cold-boot cost — later launches come up in seconds. Set
+# ANTIDETECT_ANDROID_COLDBOOT=1 to always cold-boot instead.
+ANDROID_COLDBOOT = os.environ.get("ANTIDETECT_ANDROID_COLDBOOT", "") == "1"
 
 _IS_WIN = platform.system() == "Windows"
 
@@ -567,18 +576,18 @@ class AndroidSession:
         self.serial = f"emulator-{port}"
         tp = tool_paths()
         use_mirror = scrcpy_exe() is not None
-        # -gpu swiftshader_indirect  → software render (guest side).
-        # -no-snapshot               → always cold-boot (a bad snapshot can black-screen).
-        # -no-audio                  → avoids audio-backend hangs on headless/VM hosts.
-        # -no-window                 → hide the emulator's own (black-screening) Qt window;
-        #                              scrcpy mirrors the device instead. Only when scrcpy
-        #                              is available, else fall back to the native window.
+        # -gpu host        → hardware rendering (fast); safe because we run headless.
+        # -no-audio        → avoids audio-backend hangs on headless/VM hosts.
+        # -no-boot-anim    → skip the boot animation to save startup time.
+        # -no-window       → hide the emulator's own (black-screening) Qt window; scrcpy
+        #                    mirrors the device instead (only when scrcpy is available).
+        # quickboot        → snapshot restore on later launches (seconds, not minutes).
         args = [str(tp["emulator"]), "@" + name, "-port", str(port),
-                "-gpu", ANDROID_GPU, "-no-snapshot", "-no-boot-anim", "-no-audio",
-                # More RAM/cores → far fewer "system isn't responding" (ANR) stalls,
-                # which software rendering makes likely on a fresh cold boot.
-                "-memory", "3072", "-cores", "4",
+                "-gpu", ANDROID_GPU, "-no-boot-anim", "-no-audio",
+                "-memory", ANDROID_MEMORY, "-cores", ANDROID_CORES,
                 "-netdelay", "none", "-netspeed", "full"]
+        if ANDROID_COLDBOOT:
+            args += ["-no-snapshot"]
         if use_mirror:
             args.append("-no-window")
         proxy = self.profile.proxy
