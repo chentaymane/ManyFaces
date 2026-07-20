@@ -23,22 +23,43 @@
   </header>
 
   <main>
+    <div class="stats" id="stats"></div>
+
     <div class="toolbar">
-      <span class="count" id="profile-count"></span>
-      <input id="search" class="search" type="text" placeholder="Search profiles…" />
+      <div class="toolbar-left">
+        <span class="count" id="profile-count"></span>
+        <div class="chips" id="filter-chips"></div>
+      </div>
+      <div class="search-wrap">
+        <span class="search-ic">🔍</span>
+        <input id="search" class="search" type="text" placeholder="Search profiles…" />
+      </div>
+    </div>
+
+    <!-- Bulk-action bar: appears when one or more rows are selected -->
+    <div id="bulk-bar" class="bulk-bar hidden">
+      <label class="sel-all"><input type="checkbox" id="bulk-master" /> <span id="bulk-count">0 selected</span></label>
+      <div class="bulk-actions">
+        <button data-bulk="launch" class="sm primary">▶ Launch</button>
+        <button data-bulk="stop" class="sm">■ Stop</button>
+        <button data-bulk="randomize" class="sm">🎲 Randomize</button>
+        <button data-bulk="delete" class="sm danger">🗑 Delete</button>
+        <button data-bulk="clear" class="sm ghost">Clear</button>
+      </div>
     </div>
 
     <div class="table-wrap">
       <table id="profiles">
         <thead>
           <tr>
+            <th class="col-check"><input type="checkbox" id="head-check" title="Select all" /></th>
             <th>Name</th><th>Device</th><th>Proxy</th>
             <th class="hide-sm">Locale</th><th class="hide-sm">Cookies</th>
             <th>Status</th><th></th>
           </tr>
         </thead>
         <tbody id="profiles-body">
-          <tr><td colspan="7" class="empty">Loading…</td></tr>
+          <tr><td colspan="8" class="empty">Loading…</td></tr>
         </tbody>
       </table>
     </div>

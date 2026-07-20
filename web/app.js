@@ -55,25 +55,42 @@ function proxyCell(p) {
   return `<span class="dash">— direct</span>`;
 }
 
+// selection + filter state (the "select area")
+const selected = new Set();
+let activeFilter = "all";
+
+function statusPill(running) {
+  return running
+    ? `<span class="pill on"><span class="dot"></span>running</span>`
+    : `<span class="pill off"><span class="dot"></span>stopped</span>`;
+}
+
 function renderList(profiles) {
   const body = $("#profiles-body");
   if (!profiles.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">No profiles yet. Click “+ New Profile”.</td></tr>`;
+    const msg = allProfiles.length
+      ? `No profiles match. <a href="#" id="clear-filter">Clear filters</a>`
+      : `No profiles yet. Click “+ New Profile” or “📱 New Phone”.`;
+    body.innerHTML = `<tr><td colspan="8" class="empty">${msg}</td></tr>`;
+    const cf = $("#clear-filter");
+    if (cf) cf.onclick = (e) => { e.preventDefault(); activeFilter = "all"; $("#search").value = ""; renderStats(); applySearch(); };
+    syncBulkBar();
     return;
   }
   body.innerHTML = profiles.map((p) => {
     const fp = p.fingerprint;
-    const status = p.running ? `<span class="badge on">running</span>` : `<span class="badge off">stopped</span>`;
+    const sel = selected.has(p.id);
     const toggle = p.running
       ? `<button class="sm" data-act="stop" data-id="${p.id}">Stop</button>`
       : `<button class="sm primary" data-act="start" data-id="${p.id}">Launch</button>`;
-    return `<tr>
+    return `<tr class="${sel ? "sel" : ""}">
+      <td class="col-check"><input type="checkbox" class="row-check" data-id="${p.id}" ${sel ? "checked" : ""} /></td>
       <td><div class="name">${esc(p.name)}</div><div class="sub">${fp.screen_width}×${fp.screen_height}</div></td>
       <td>${deviceCell(fp)}<div class="sub">${engineBadge(p.engine)}</div></td>
       <td>${proxyCell(p)}</td>
       <td class="hide-sm sub">${esc(fp.language)} · ${esc(fp.timezone)}</td>
       <td class="hide-sm"><button class="sm ghost" data-act="cookies" data-id="${p.id}">Cookies</button></td>
-      <td>${status}</td>
+      <td>${statusPill(p.running)}</td>
       <td class="actions-cell">
         ${toggle}
         <button class="sm" data-act="randomize" data-id="${p.id}" title="Regenerate fingerprint + fresh cookie jar">🎲</button>
@@ -83,28 +100,104 @@ function renderList(profiles) {
       </td>
     </tr>`;
   }).join("");
+  syncBulkBar();
 }
 
-function applySearch() {
+function currentView() {
   const q = $("#search").value.trim().toLowerCase();
-  const filtered = !q ? allProfiles : allProfiles.filter((p) => {
+  return allProfiles.filter((p) => {
     const fp = p.fingerprint;
+    if (activeFilter === "running" && !p.running) return false;
+    if (["android", "chromium", "camoufox"].includes(activeFilter) && p.engine !== activeFilter) return false;
+    if (!q) return true;
     return (p.name + " " + fp.os + " " + (fp.device_name || "") + " " + fp.language).toLowerCase().includes(q);
   });
-  renderList(filtered);
+}
+
+function applySearch() { renderList(currentView()); }
+
+function renderStats() {
+  const total = allProfiles.length;
+  const running = allProfiles.filter((p) => p.running).length;
+  const byEngine = {};
+  allProfiles.forEach((p) => (byEngine[p.engine] = (byEngine[p.engine] || 0) + 1));
+  $("#stats").innerHTML = `
+    <div class="stat"><div class="stat-n">${total}</div><div class="stat-l">Profiles</div></div>
+    <div class="stat"><div class="stat-n on">${running}</div><div class="stat-l">Running</div></div>
+    <div class="stat wide"><div class="stat-engines">${Object.entries(byEngine).map(([e, n]) => `${engineBadge(e)}&nbsp;${n}`).join(" &nbsp; ") || "—"}</div><div class="stat-l">By engine</div></div>`;
+  const chips = [["all", "All", total], ["running", "● Running", running],
+    ["android", "🤖 Android", byEngine.android || 0], ["chromium", "🌐 Chromium", byEngine.chromium || 0],
+    ["camoufox", "🦊 Camoufox", byEngine.camoufox || 0]];
+  $("#filter-chips").innerHTML = chips
+    .filter((c) => c[0] === "all" || c[0] === "running" || c[2] > 0)
+    .map(([k, label, n]) => `<button class="chip ${activeFilter === k ? "active" : ""}" data-filter="${k}">${label} <span>${n}</span></button>`).join("");
+}
+
+function syncBulkBar() {
+  const n = selected.size;
+  $("#bulk-bar").classList.toggle("hidden", n === 0);
+  $("#bulk-count").textContent = `${n} selected`;
+  const view = currentView();
+  const allSel = view.length > 0 && view.every((p) => selected.has(p.id));
+  $("#head-check").checked = allSel;
+  $("#bulk-master").checked = allSel;
+}
+
+function toggleSelectAll(on) {
+  currentView().forEach((p) => (on ? selected.add(p.id) : selected.delete(p.id)));
+  applySearch();
 }
 
 async function loadProfiles() {
   try {
     allProfiles = await api("/api/profiles");
+    // Drop selections for profiles that no longer exist.
+    const ids = new Set(allProfiles.map((p) => p.id));
+    [...selected].forEach((id) => { if (!ids.has(id)) selected.delete(id); });
     $("#profile-count").textContent = `${allProfiles.length} profile${allProfiles.length === 1 ? "" : "s"}`;
+    renderStats();
     applySearch();
   } catch (e) {
-    $("#profiles-body").innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message)}</td></tr>`;
+    $("#profiles-body").innerHTML = `<tr><td colspan="8" class="empty">Error: ${esc(e.message)}</td></tr>`;
   }
 }
 
 $("#search").addEventListener("input", applySearch);
+$("#head-check").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
+$("#bulk-master").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
+$("#filter-chips").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-filter]"); if (!b) return;
+  activeFilter = b.dataset.filter; renderStats(); applySearch();
+});
+$("#profiles-body").addEventListener("change", (e) => {
+  const cb = e.target.closest(".row-check"); if (!cb) return;
+  if (cb.checked) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
+  cb.closest("tr").classList.toggle("sel", cb.checked);
+  syncBulkBar();
+});
+$("#bulk-bar").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-bulk]"); if (!b) return;
+  const act = b.dataset.bulk;
+  if (act === "clear") { selected.clear(); applySearch(); return; }
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (act === "delete" && !confirm(`Delete ${ids.length} profile(s) and all their data?`)) return;
+  if (act === "randomize" && !confirm(`Regenerate fingerprint + cookies for ${ids.length} profile(s)?`)) return;
+  b.disabled = true; const lbl = b.textContent; b.textContent = "…";
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      if (act === "launch") await api(`/api/profiles/${id}/start`, { method: "POST" });
+      else if (act === "stop") await api(`/api/profiles/${id}/stop`, { method: "POST" });
+      else if (act === "delete") { await api(`/api/profiles/${id}`, { method: "DELETE" }); selected.delete(id); }
+      else if (act === "randomize") await api(`/api/profiles/${id}/randomize-all`, { method: "POST", body: JSON.stringify({ seed_cookies: 15 }) });
+      ok++;
+    } catch (_) { fail++; }
+  }
+  b.disabled = false; b.textContent = lbl;
+  toast(`${act}: ${ok} done${fail ? `, ${fail} failed` : ""}`, fail ? "err" : "ok");
+  loadProfiles();
+});
 
 // -------------------------------------------------------------- row actions ---
 $("#profiles-body").addEventListener("click", async (e) => {

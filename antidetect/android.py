@@ -479,14 +479,14 @@ def _avd_exists(name: str) -> bool:
 # to even start on a tight disk ("Not enough space to create userdata partition").
 # A browser profile needs far less; ~4.5 GB is plenty and roughly halves the footprint.
 DATA_PARTITION = os.environ.get("ANTIDETECT_ANDROID_DATA_MB", "4608") + "M"
+# Render resolution for the phone as "WxHxDPI". Fewer pixels = far less GPU/CPU load
+# on weak/integrated GPUs — the single biggest perf lever. 720×1600 still looks like a
+# real phone. Set ANTIDETECT_ANDROID_LCD="" to keep the device preset's native res.
+ANDROID_LCD = os.environ.get("ANTIDETECT_ANDROID_LCD", "720x1600x320")
 
 
-def _cap_data_partition(name: str) -> None:
-    """Pin `disk.dataPartition.size` in the AVD config so it doesn't demand ~7.4 GB.
-
-    Safe to call before first boot (no userdata.img yet). We don't shrink an AVD that
-    has already created its userdata — only ensure the property is present.
-    """
+def _patch_avd_config(name: str, props: dict[str, str]) -> None:
+    """Set key=value pairs in an AVD's config.ini (replacing any existing keys)."""
     cfg = avd_home() / f"{name}.avd" / "config.ini"
     if not cfg.exists():
         return
@@ -494,21 +494,34 @@ def _cap_data_partition(name: str) -> None:
         lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
     except Exception:  # noqa: BLE001
         return
-    lines = [ln for ln in lines if not ln.startswith("disk.dataPartition.size")]
-    lines.append(f"disk.dataPartition.size={DATA_PARTITION}")
+    lines = [ln for ln in lines if ln.split("=", 1)[0].strip() not in props]
+    lines += [f"{k}={v}" for k, v in props.items()]
     try:
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
 
 
+def _tune_avd_config(name: str) -> None:
+    """Apply perf/size settings to a not-yet-booted AVD: smaller data partition and a
+    lighter render resolution. Skipped once userdata exists (would fight the snapshot)."""
+    props = {"disk.dataPartition.size": DATA_PARTITION}
+    if ANDROID_LCD:
+        try:
+            w, h, dpi = ANDROID_LCD.lower().split("x")
+            props.update({"hw.lcd.width": w, "hw.lcd.height": h, "hw.lcd.density": dpi})
+        except ValueError:
+            pass
+    _patch_avd_config(name, props)
+
+
 def ensure_avd(profile, log: Callable[[str], None]) -> str:
     name = _avd_name(profile.id)
     if _avd_exists(name):
-        # Cap the partition on the config in case this AVD predates the cap and hasn't
-        # booted yet (harmless if userdata already exists).
+        # Apply perf/size tuning if this AVD predates it and hasn't booted yet
+        # (harmless once userdata exists — we skip to avoid fighting the snapshot).
         if not (avd_home() / f"{name}.avd" / "userdata.img").exists():
-            _cap_data_partition(name)
+            _tune_avd_config(name)
         return name
     device = "pixel_6"
     try:
@@ -521,7 +534,7 @@ def ensure_avd(profile, log: Callable[[str], None]) -> str:
                "-d", device, "--force"], log, input_text="no\n", timeout=180)
     if rc != 0 or not _avd_exists(name):
         raise RuntimeError(f"Failed to create AVD (code {rc}).")
-    _cap_data_partition(name)
+    _tune_avd_config(name)
     return name
 
 
@@ -605,9 +618,20 @@ class AndroidSession:
             creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0),
         )
         self._wait_boot()
+        self._perf_tune()
         self._open_url(start_url)
         if use_mirror:
             self._start_mirror()
+
+    def _perf_tune(self) -> None:
+        """Disable guest UI animations — the cheapest, biggest 'feels faster' win on
+        weak hardware (transitions stop eating GPU/CPU time)."""
+        for key in ("window_animation_scale", "transition_animation_scale",
+                    "animator_duration_scale"):
+            try:
+                self._adb("shell", "settings", "put", "global", key, "0", timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _start_mirror(self) -> None:
         """Open scrcpy — a reliable window mirroring the device, with real touch input."""
@@ -618,8 +642,11 @@ class AndroidSession:
         env = _tool_env()
         # Point scrcpy at OUR adb so it talks to the same server the emulator registered on.
         env["ADB"] = str(tool_paths()["adb"])
+        # Cap fps + bitrate so mirroring itself doesn't tax a weak GPU; --max-size
+        # keeps the stream light. These make the window feel much smoother.
         args = [str(exe), "-s", self.serial or "", "--window-title", f"📱 {title}",
-                "--stay-awake", "--no-audio", "--max-size", "1024"]
+                "--stay-awake", "--no-audio", "--max-size", "1024",
+                "--max-fps", "30", "--video-bit-rate", "4M"]
         self.log("$ " + " ".join(Path(a).name if os.sep in a else a for a in args))
         try:
             self.mirror = subprocess.Popen(
