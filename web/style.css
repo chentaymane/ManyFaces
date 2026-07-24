@@ -113,7 +113,12 @@ tbody tr.sel:hover { background: rgba(99,102,241,.2) !important; }
 .pill.on .dot { background: #4ade80; box-shadow: 0 0 0 3px rgba(34,197,94,.18); animation: pulse 2s infinite; }
 .pill.off { background: rgba(139,152,169,.12); color: var(--muted); }
 .pill.off .dot { background: var(--muted-2); }
+.pill.launching { background: rgba(99,102,241,.14); color: #a5b4fc; }
+.pill.launching .spin { width: 11px; height: 11px; border: 2px solid rgba(165,180,252,.35); border-top-color: #a5b4fc; border-radius: 50%; animation: spin .7s linear infinite; }
+.pill.err { background: rgba(239,68,68,.14); color: #f87171; cursor: pointer; }
+.pill.err:hover { background: rgba(239,68,68,.24); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ----------------------------------------------------------------- table ---- */
 .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

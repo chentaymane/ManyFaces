@@ -562,6 +562,8 @@ class AndroidSession:
         self.mirror: Optional[subprocess.Popen] = None   # scrcpy window
         self.serial: Optional[str] = None
         self.error: Optional[str] = None
+        self.state = "stopped"                           # launching|running|error|stopped
+        self._thread: Optional[threading.Thread] = None
         self._log: list[str] = []
         self._logf = None
         self.boot_log_path: Optional[Path] = None
@@ -571,8 +573,14 @@ class AndroidSession:
         self._log.append(m)
 
     @property
+    def status(self) -> str:
+        if self.state == "running" and not (self.proc and self.proc.poll() is None):
+            return "stopped"   # device died since
+        return self.state
+
+    @property
     def running(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
+        return self.status == "running"
 
     def _log_tail(self, n: int = 25) -> str:
         try:
@@ -584,6 +592,26 @@ class AndroidSession:
         return ""
 
     def start(self, start_url: str) -> None:
+        """Non-blocking: boot the device on a background thread (first boot is minutes)."""
+        self.state = "launching"
+        self.error = None
+        self._thread = threading.Thread(target=self._boot, args=(start_url,),
+                                        daemon=True, name=f"android-{self.profile.id}")
+        self._thread.start()
+
+    def _boot(self, start_url: str) -> None:
+        try:
+            self._launch(start_url)
+            self.state = "running"
+        except Exception as exc:  # noqa: BLE001
+            self.error = str(exc)
+            self.state = "error"
+            try:
+                self.stop()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _launch(self, start_url: str) -> None:
         name = ensure_avd(self.profile, self.log)
         port = _free_port()
         self.serial = f"emulator-{port}"
@@ -685,8 +713,8 @@ class AndroidSession:
         # timeout if the emulator dies at startup). Each loop re-checks the process so a
         # crash — e.g. "not enough disk space" — fails in ~2s, not minutes.
         while time.time() < deadline:
-            if not self.running:
-                raise RuntimeError(self._boot_failure_reason())
+            if self.proc is None or self.proc.poll() is not None:
+                raise RuntimeError(self._boot_failure_reason())  # emulator process died
             try:
                 out = self._adb("shell", "getprop", "sys.boot_completed", timeout=10).stdout.strip()
                 if out == "1":
@@ -751,6 +779,8 @@ class AndroidSession:
 
     def stop(self) -> None:
         self._stopping = True
+        if self.state != "error":
+            self.state = "stopped"
         # Close the mirror window first.
         if self.mirror and self.mirror.poll() is None:
             try:
@@ -790,6 +820,8 @@ class AndroidManager:
         self._lock = threading.Lock()
 
     def start(self, profile) -> None:
+        # This check is synchronous & fast, so a "not installed" error still surfaces
+        # immediately to the caller; the boot itself runs in the background.
         if not status()["ready"]:
             raise RuntimeError(
                 "The Android engine isn't installed yet. Open the Android setup and "
@@ -797,14 +829,12 @@ class AndroidManager:
             )
         with self._lock:
             s = self._sessions.get(profile.id)
-            if s and s.running:
+            if s and s.status in ("launching", "running"):
                 return
             s = AndroidSession(profile)
             self._sessions[profile.id] = s
         from .browser import normalize_start_url
-        s.start(normalize_start_url(profile.start_url))
-        if s.error:
-            raise RuntimeError(s.error)
+        s.start(normalize_start_url(profile.start_url))  # non-blocking
 
     def stop(self, profile_id: str) -> bool:
         with self._lock:
@@ -818,8 +848,16 @@ class AndroidManager:
         s = self._sessions.get(profile_id)
         return bool(s and s.running)
 
+    def status(self, profile_id: str) -> str:
+        s = self._sessions.get(profile_id)
+        return s.status if s else "stopped"
+
+    def error(self, profile_id: str) -> Optional[str]:
+        s = self._sessions.get(profile_id)
+        return s.error if s else None
+
     def running_ids(self) -> list[str]:
-        return [pid for pid, s in self._sessions.items() if s.running]
+        return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
 
     def stop_all(self) -> None:
         for pid in list(self._sessions.keys()):

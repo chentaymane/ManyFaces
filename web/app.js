@@ -59,10 +59,14 @@ function proxyCell(p) {
 const selected = new Set();
 let activeFilter = "all";
 
-function statusPill(running) {
-  return running
-    ? `<span class="pill on"><span class="dot"></span>running</span>`
-    : `<span class="pill off"><span class="dot"></span>stopped</span>`;
+const launchErrors = {};   // profile id -> last launch error message
+
+function statusPill(p) {
+  const st = p.status || (p.running ? "running" : "stopped");
+  if (st === "launching") return `<span class="pill launching"><span class="spin"></span>starting…</span>`;
+  if (st === "running") return `<span class="pill on"><span class="dot"></span>running</span>`;
+  if (st === "error") return `<span class="pill err" data-err="${p.id}" title="Click for details">⚠ failed</span>`;
+  return `<span class="pill off"><span class="dot"></span>stopped</span>`;
 }
 
 function renderList(profiles) {
@@ -80,7 +84,9 @@ function renderList(profiles) {
   body.innerHTML = profiles.map((p) => {
     const fp = p.fingerprint;
     const sel = selected.has(p.id);
-    const toggle = p.running
+    if (p.launch_error) launchErrors[p.id] = p.launch_error; else if (p.status !== "error") delete launchErrors[p.id];
+    const st = p.status || (p.running ? "running" : "stopped");
+    const toggle = (st === "running" || st === "launching")
       ? `<button class="sm" data-act="stop" data-id="${p.id}">Stop</button>`
       : `<button class="sm primary" data-act="start" data-id="${p.id}">Launch</button>`;
     return `<tr class="${sel ? "sel" : ""}">
@@ -90,7 +96,7 @@ function renderList(profiles) {
       <td>${proxyCell(p)}</td>
       <td class="hide-sm sub">${esc(fp.language)} · ${esc(fp.timezone)}</td>
       <td class="hide-sm"><button class="sm ghost" data-act="cookies" data-id="${p.id}">Cookies</button></td>
-      <td>${statusPill(p.running)}</td>
+      <td>${statusPill(p)}</td>
       <td class="actions-cell">
         ${toggle}
         <button class="sm" data-act="randomize" data-id="${p.id}" title="Regenerate fingerprint + fresh cookie jar">🎲</button>
@@ -157,6 +163,7 @@ async function loadProfiles() {
     $("#profile-count").textContent = `${allProfiles.length} profile${allProfiles.length === 1 ? "" : "s"}`;
     renderStats();
     applySearch();
+    if (allProfiles.some((p) => p.status === "launching")) ensurePolling();
   } catch (e) {
     $("#profiles-body").innerHTML = `<tr><td colspan="8" class="empty">Error: ${esc(e.message)}</td></tr>`;
   }
@@ -207,8 +214,10 @@ $("#profiles-body").addEventListener("click", async (e) => {
   try {
     if (act === "start") {
       btn.textContent = "Starting…"; btn.disabled = true;
+      delete launchErrors[id];
       const r = await api(`/api/profiles/${id}/start`, { method: "POST" });
-      toast(r.proxy ? `Launched · ${r.proxy}` : "Profile launched");
+      toast(r.proxy ? `Launching · ${r.proxy}` : "Launching…");
+      ensurePolling();
     } else if (act === "stop") {
       await api(`/api/profiles/${id}/stop`, { method: "POST" });
       toast("Profile stopped");
@@ -239,6 +248,27 @@ $("#profiles-body").addEventListener("click", async (e) => {
     }
     loadProfiles();
   }
+});
+
+// Live status: while any profile is launching, refresh so pills update on their own.
+let pollTimer = null;
+function ensurePolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    await loadProfiles();
+    const anyLaunching = allProfiles.some((p) => p.status === "launching");
+    if (!anyLaunching) { clearInterval(pollTimer); pollTimer = null; }
+  }, 2000);
+}
+
+// Click a "⚠ failed" pill to see why the launch failed.
+$("#profiles-body").addEventListener("click", (e) => {
+  const pill = e.target.closest(".pill.err[data-err]");
+  if (!pill) return;
+  const id = pill.dataset.err;
+  const msg = launchErrors[id] || "Launch failed. Check that the engine is installed and try again.";
+  if (/Android engine isn't installed/i.test(msg)) { openAndroid(); return; }
+  alert("Launch failed:\n\n" + msg);
 });
 
 // ------------------------------------------------------------------- editor ---

@@ -463,21 +463,31 @@ class BrowserSession:
         self.error: Optional[str] = None
 
     @property
-    def running(self) -> bool:
+    def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, timeout: float = 90.0) -> None:
-        if self.running:
+    @property
+    def status(self) -> str:
+        """launching | running | error | stopped."""
+        if self.alive:
+            return "error" if self.error else ("running" if self._ready.is_set() else "launching")
+        return "error" if self.error else "stopped"
+
+    @property
+    def running(self) -> bool:
+        return self.status == "running"
+
+    def start(self) -> None:
+        """Non-blocking: kick off the browser on its own thread and return at once.
+        Callers poll `status` for progress instead of waiting here (a launch can take
+        seconds, or minutes for the first Android boot — blocking froze the UI)."""
+        if self.alive:
             return
         self._stop.clear()
         self._ready.clear()
         self.error = None
         self._thread = threading.Thread(target=self._run, daemon=True, name=f"browser-{self.profile.id}")
         self._thread.start()
-        # Wait until the browser is up (or failed) so the API can report status.
-        self._ready.wait(timeout=timeout)
-        if self.error:
-            raise BrowserError(self.error)
 
     def stop(self) -> None:
         self._stop.set()
@@ -609,8 +619,8 @@ class SessionManager:
     def start(self, profile: Profile) -> None:
         with self._lock:
             session = self._sessions.get(profile.id)
-            if session and session.running:
-                return
+            if session and session.status in ("launching", "running"):
+                return  # already up or coming up — don't launch a second window
             session = BrowserSession(profile)
             self._sessions[profile.id] = session
         session.start()
@@ -627,8 +637,16 @@ class SessionManager:
         session = self._sessions.get(profile_id)
         return bool(session and session.running)
 
+    def status(self, profile_id: str) -> str:
+        session = self._sessions.get(profile_id)
+        return session.status if session else "stopped"
+
+    def error(self, profile_id: str) -> Optional[str]:
+        session = self._sessions.get(profile_id)
+        return session.error if session else None
+
     def running_ids(self) -> list[str]:
-        return [pid for pid, s in self._sessions.items() if s.running]
+        return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
 
     def stop_all(self) -> None:
         for pid in list(self._sessions.keys()):

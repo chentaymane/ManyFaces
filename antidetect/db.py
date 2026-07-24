@@ -28,8 +28,12 @@ _SCHEMA = """
 
 def _connect() -> sqlite3.Connection:
     config.ensure_dirs()
-    conn = sqlite3.connect(config.DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    # Wait instead of instantly failing with "database is locked" when two requests
+    # (e.g. launching several profiles at once) write concurrently.
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
     # Idempotent: guarantees the schema exists no matter how the app was started.
     conn.execute(_SCHEMA)
     return conn

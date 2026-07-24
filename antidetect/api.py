@@ -374,9 +374,19 @@ def _is_running(profile_id: str) -> bool:
     return manager.is_running(profile_id) or android_engine.manager.is_running(profile_id)
 
 
+def _live_status(profile: Profile) -> tuple[str, Optional[str]]:
+    """(status, error) from whichever manager owns this profile's engine.
+    status ∈ launching | running | error | stopped."""
+    mgr = _engine_manager(profile)
+    return mgr.status(profile.id), mgr.error(profile.id)
+
+
 def _with_status(profile: Profile) -> dict[str, Any]:
     d = profile.model_dump()
-    d["running"] = _is_running(profile.id)
+    st, err = _live_status(profile)
+    d["status"] = st
+    d["running"] = st in ("running", "launching")
+    d["launch_error"] = err
     return d
 
 
@@ -443,20 +453,34 @@ def start_profile(profile_id: str) -> dict[str, Any]:
     if next_index is not None:  # persist rotation so the next launch advances
         db.update(profile_id, ProfileUpdate(rotation_index=next_index))
     try:
+        # Non-blocking: returns immediately; the browser/device comes up in the
+        # background. Only fast, definite failures (e.g. Android not installed) raise.
         _engine_manager(profile).start(profile)
     except (BrowserError, RuntimeError) as exc:
         raise HTTPException(502, str(exc))
+    st, _ = _live_status(profile)
     return {
-        "running": _is_running(profile_id),
+        "status": st,
+        "running": st in ("running", "launching"),
         "proxy": f"{eff_proxy.type}://{eff_proxy.host}:{eff_proxy.port}" if eff_proxy.is_set else None,
     }
+
+
+@app.get("/api/profiles/{profile_id}/status")
+def profile_status(profile_id: str) -> dict[str, Any]:
+    """Poll target for the UI: how a launch is progressing (launching→running/error)."""
+    profile = db.get(profile_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    st, err = _live_status(profile)
+    return {"status": st, "running": st in ("running", "launching"), "error": err}
 
 
 @app.post("/api/profiles/{profile_id}/stop")
 def stop_profile(profile_id: str) -> dict[str, Any]:
     manager.stop(profile_id)
     android_engine.manager.stop(profile_id)
-    return {"running": False}
+    return {"running": False, "status": "stopped"}
 
 
 @app.get("/api/running")
