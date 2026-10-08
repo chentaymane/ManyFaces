@@ -16,6 +16,8 @@
       </div>
     </div>
     <div class="header-actions">
+      <button id="import-btn" class="ghost" title="Import profiles from a ManyFaces export (.json)">⇪ Import</button>
+      <input id="import-file" type="file" accept=".json,application/json" hidden />
       <button id="bulk-btn" class="ghost">⚙ Bulk create</button>
       <button id="phone-btn" class="ghost">📱 New Phone</button>
       <button id="new-btn" class="primary">+ New Profile</button>
@@ -23,6 +25,16 @@
   </header>
 
   <main>
+    <!-- Engine setup: shown only while the Camoufox browser isn't downloaded yet -->
+    <div id="engine-banner" class="engine-banner hidden">
+      <div class="engine-banner-text">
+        <strong id="engine-title">Camoufox browser not downloaded yet</strong>
+        <span id="engine-sub">One-time download (~1.3 GB). Needed to launch Camoufox profiles; Chromium and Android profiles work without it.</span>
+        <div class="progress hidden-block" id="engine-progress"><div class="progress-bar" id="engine-bar"></div></div>
+      </div>
+      <button id="engine-download" class="primary">⬇ Download engine</button>
+    </div>
+
     <div class="stats" id="stats"></div>
 
     <div class="toolbar">
@@ -43,6 +55,7 @@
         <button data-bulk="launch" class="sm primary">▶ Launch</button>
         <button data-bulk="stop" class="sm">■ Stop</button>
         <button data-bulk="randomize" class="sm">🎲 Randomize</button>
+        <button data-bulk="export" class="sm">⇩ Export</button>
         <button data-bulk="delete" class="sm danger">🗑 Delete</button>
         <button data-bulk="clear" class="sm ghost">Clear</button>
       </div>
@@ -54,12 +67,12 @@
           <tr>
             <th class="col-check"><input type="checkbox" id="head-check" title="Select all" /></th>
             <th>Name</th><th>Device</th><th>Proxy</th>
-            <th class="hide-sm">Locale</th><th class="hide-sm">Cookies</th>
+            <th class="hide-sm">Locale</th>
             <th>Status</th><th></th>
           </tr>
         </thead>
         <tbody id="profiles-body">
-          <tr><td colspan="8" class="empty">Loading…</td></tr>
+          <tr><td colspan="7" class="empty">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -105,6 +118,16 @@
           </div>
         </div>
         <div class="field hint" id="engine-hint" style="margin-top:-4px"></div>
+        <div class="row">
+          <div class="field">
+            <label>Tags <span class="hint">— comma-separated, searchable</span></label>
+            <input id="f-tags" type="text" placeholder="shop, client-a" />
+          </div>
+          <div class="field">
+            <label>Notes</label>
+            <input id="f-notes" type="text" placeholder="Anything to remember about this profile" />
+          </div>
+        </div>
 
         <fieldset>
           <legend>Proxy</legend>
@@ -314,13 +337,27 @@
       <div class="modal-body">
         <p class="field hint" id="cookie-info" style="margin-top:0"></p>
         <div class="field">
-          <label>Add random test cookies</label>
-          <input id="cookie-count" type="number" value="10" min="1" max="200" />
+          <label>Import cookies <span class="hint">— Playwright / browser-extension JSON array; replaces the staged jar</span></label>
+          <textarea id="cookie-json" placeholder='[{"name": "sid", "value": "…", "domain": ".example.com", "path": "/"}]'></textarea>
+        </div>
+        <div class="pool-actions">
+          <button id="cookie-import" class="ghost sm">⇪ Import JSON</button>
+          <button id="cookie-export" class="ghost sm">⇩ Export JSON</button>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div class="field">
+            <label>Add random test cookies</label>
+            <input id="cookie-count" type="number" value="10" min="1" max="200" />
+          </div>
+          <div class="field btn-field">
+            <label>&nbsp;</label>
+            <button id="cookie-add" class="ghost">Add</button>
+          </div>
         </div>
       </div>
       <div class="modal-foot">
         <button id="cookie-clear" class="ghost danger">Clear all</button>
-        <button id="cookie-add" class="primary">Add cookies</button>
+        <button id="cookie-done" class="primary">Done</button>
       </div>
     </div>
   </div>

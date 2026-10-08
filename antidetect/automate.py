@@ -26,16 +26,25 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import Iterator
 
 from . import cookies as cookie_store, db
-from .browser import build_launch_options
-from .models import Profile
+from .browser import camoufox_launch_options
+from .models import Profile, ProfileUpdate
 
 
 def _resolve(profile_or_id) -> Profile:
+    """Load the profile and resolve its proxy for this launch, like the dashboard does:
+    the stored fingerprint is migrated to the installed engine, and random/rotate
+    proxy modes pick from the pool (rotation advances and is persisted)."""
     if isinstance(profile_or_id, Profile):
-        return profile_or_id
-    profile = db.get(profile_or_id)
-    if not profile:
-        raise ValueError(f"No profile with id {profile_or_id!r}")
+        profile = profile_or_id.model_copy(deep=True)
+    else:
+        profile = db.get(profile_or_id)
+        if not profile:
+            raise ValueError(f"No profile with id {profile_or_id!r}")
+    db.prepare_for_launch(profile)
+    proxy, next_index = profile.select_proxy()
+    profile.proxy = proxy
+    if next_index is not None and db.get(profile.id):
+        db.update(profile.id, ProfileUpdate(rotation_index=next_index))
     return profile
 
 
@@ -45,8 +54,8 @@ def launch(profile_or_id, headless: bool | None = None) -> Iterator[object]:
     from camoufox.sync_api import Camoufox
 
     profile = _resolve(profile_or_id)
-    opts = build_launch_options(profile, headless=headless)
-    with Camoufox(**opts) as ctx:
+    opts = camoufox_launch_options(profile, headless=headless)
+    with Camoufox(from_options=opts, persistent_context=True) as ctx:
         staged = cookie_store.load(profile.id)
         if staged:
             try:
@@ -62,8 +71,8 @@ async def launch_async(profile_or_id, headless: bool | None = None):
     from camoufox.async_api import AsyncCamoufox
 
     profile = _resolve(profile_or_id)
-    opts = build_launch_options(profile, headless=headless)
-    async with AsyncCamoufox(**opts) as ctx:
+    opts = camoufox_launch_options(profile, headless=headless)
+    async with AsyncCamoufox(from_options=opts, persistent_context=True) as ctx:
         staged = cookie_store.load(profile.id)
         if staged:
             try:

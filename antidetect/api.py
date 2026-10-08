@@ -4,9 +4,10 @@ fingerprint tools, and a local automation API.
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -101,11 +102,21 @@ _engine_lock = threading.Lock()
 
 
 def _detect_engine() -> None:
-    # A portable build ships the browser alongside the app; activating it writes the
-    # version shim so the check below passes without any download.
+    # A portable build ships the browser alongside the app and launches it via
+    # executable_path, so it counts as installed without any download.
     from .browser import activate_bundled_engine
 
-    activate_bundled_engine()
+    if activate_bundled_engine():
+        exe = config.bundled_browser_exe()
+        try:
+            from camoufox.utils import resolve_verstr
+
+            _engine["version"] = resolve_verstr(exe)
+        except Exception:  # noqa: BLE001 - camoufox 0.4.x: read the bundled version.json
+            _engine["version"] = "bundled"
+        _engine["installed"] = True
+        _engine["detail"] = None
+        return
     try:
         from camoufox.pkgman import installed_verstr
 
@@ -163,7 +174,7 @@ def _download_resumable(
 
     Per-segment byte offsets are persisted to `meta_path`, so a network drop or even
     closing and reopening the app resumes from where it left off instead of
-    re-downloading the whole ~500 MB file. Each segment also retries with backoff to
+    re-downloading the whole ~1.3 GB file. Each segment also retries with backoff to
     ride out transient blips (the common failure on throttled/flaky GitHub links).
     """
     import concurrent.futures as cf
@@ -245,17 +256,63 @@ def _friendly_error(exc: Exception) -> str:
     return f"{name}: {exc}"
 
 
+def _install_downloaded(fetcher, archive: str) -> None:
+    """Install an already-downloaded Camoufox zip the way `camoufox fetch` would.
+
+    Camoufox 0.5+ keeps versioned installs (browsers/<repo>/<version>/ plus an
+    active-version pointer and a compatibility flag), so we hand the archive to
+    its own installer — it verifies the release checksum, extracts, writes
+    version.json and marks the build active — instead of unzipping by hand. Only
+    the network step is ours (resumable, multi-connection, with progress).
+    Camoufox 0.4.x used a flat INSTALL_DIR + `set_version()`, handled as before.
+    """
+    if hasattr(fetcher, "set_version"):  # camoufox 0.4.x
+        import zipfile
+
+        from camoufox.pkgman import INSTALL_DIR
+
+        if INSTALL_DIR.exists():
+            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as zf:
+            members = zf.infolist()
+            count = len(members)
+            _engine["total"] = count
+            for i, member in enumerate(members, 1):
+                zf.extract(member, str(INSTALL_DIR))
+                if i % 40 == 0 or i == count:
+                    _engine["downloaded"] = i
+                    _engine["percent"] = int(i * 100 / count) if count else 100
+        fetcher.set_version()
+        return
+
+    from camoufox.multiversion import install_versioned
+
+    def _from_disk(buffer, url):  # noqa: ARG001 - replaces the network download
+        with open(archive, "rb") as src:
+            shutil.copyfileobj(src, buffer, 1 << 20)
+        buffer.seek(0)
+        return buffer
+
+    fetcher.download_file = _from_disk  # instance attribute shadows the staticmethod
+    install_versioned(fetcher, replace=True)
+    try:
+        from camoufox.pkgman import ensure_browser_profile_dir
+
+        ensure_browser_profile_dir()
+    except Exception:  # noqa: BLE001 - optional housekeeping in newer releases
+        pass
+    _engine["percent"] = 100
+
+
 def _download_engine() -> None:
     """Download + install the Camoufox browser, updating _engine progress fields."""
-    import shutil
-    import zipfile
-
     part = str(config.DATA_DIR / "camoufox-download.zip.part")
     meta = str(config.DATA_DIR / "camoufox-download.zip.meta")
 
     try:
         import requests
-        from camoufox.pkgman import CamoufoxFetcher, INSTALL_DIR
+        from camoufox.pkgman import CamoufoxFetcher
 
         config.ensure_dirs()
         _engine.update(phase="downloading", error=None, downloaded=0, total=0, percent=0, speed=0)
@@ -302,23 +359,8 @@ def _download_engine() -> None:
                 f"Download incomplete ({actual // 1048576} of {total // 1048576} MB). Please retry."
             )
 
-        # Extract with real per-file progress. Start from a clean install dir so a
-        # previous partial attempt can't leave stale/half files behind.
         _engine.update(phase="extracting", percent=0, downloaded=0, total=0, speed=0)
-        if INSTALL_DIR.exists():
-            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
-        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-
-        with zipfile.ZipFile(part) as zf:
-            members = zf.infolist()
-            count = len(members)
-            _engine["total"] = count
-            for i, member in enumerate(members, 1):
-                zf.extract(member, str(INSTALL_DIR))
-                if i % 40 == 0 or i == count:
-                    _engine["downloaded"] = i
-                    _engine["percent"] = int(i * 100 / count) if count else 100
-        fetcher.set_version()
+        _install_downloaded(fetcher, part)
 
         # Success — remove the now-consumed download artifacts.
         for f in (part, meta):
@@ -425,6 +467,11 @@ def delete_profile(profile_id: str) -> None:
     android_engine.delete_avd(profile_id)
     if not db.delete(profile_id):
         raise HTTPException(404, "Profile not found")
+    # And its browser data (cookies, storage, cache) — otherwise every deleted
+    # profile leaves its whole Firefox/Chromium profile behind on disk.
+    data_dir = config.PROFILES_DIR / profile_id
+    if data_dir.is_dir() and data_dir.resolve().parent == config.PROFILES_DIR.resolve():
+        shutil.rmtree(data_dir, ignore_errors=True)
 
 
 @app.post("/api/profiles/{profile_id}/clone")
@@ -447,6 +494,14 @@ def start_profile(profile_id: str) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
+    st, _ = _live_status(profile)
+    if st in ("launching", "running"):
+        # Already up: don't advance the proxy rotation for a launch that won't happen.
+        return {"status": st, "running": True, "proxy": None}
+    if profile.engine != "android":
+        # Migrate fingerprints made for an older engine (e.g. a GPU pair Camoufox
+        # 0.5+ no longer accepts) before they can abort the launch.
+        db.prepare_for_launch(profile)
     # Resolve the effective proxy for this launch (random draw / rotate advance).
     eff_proxy, next_index = profile.select_proxy()
     profile.proxy = eff_proxy  # in-memory: what this session launches with
@@ -580,12 +635,24 @@ def generate_fp(os: str | None = None) -> dict[str, Any]:
     return fp_gen.generate(os_name=os).to_dict()
 
 
+def _regenerate(profile: Profile, os_name: str | None) -> FingerprintModel:
+    """A fresh fingerprint of the same kind of device unless an OS is requested.
+
+    🎲 on a Windows profile used to be able to hand back an Android phone (the
+    random pool mixes OSes), silently changing what the profile *is*.
+    """
+    old = profile.fingerprint
+    if os_name is None:
+        os_name = old.os
+    return FingerprintModel.from_fingerprint(fp_gen.generate(os_name=os_name))
+
+
 @app.post("/api/profiles/{profile_id}/fingerprint/randomize")
 def randomize_fp(profile_id: str, os: str | None = None) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
-    new_fp = FingerprintModel.from_fingerprint(fp_gen.generate(os_name=os))
+    new_fp = _regenerate(profile, os)
     updated = db.update(profile_id, ProfileUpdate(fingerprint=new_fp))
     return _with_status(updated)  # type: ignore[arg-type]
 
@@ -601,7 +668,7 @@ def randomize_all(profile_id: str, req: RandomizeAllRequest) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
-    new_fp = FingerprintModel.from_fingerprint(fp_gen.generate(os_name=req.os))
+    new_fp = _regenerate(profile, req.os)
     updated = db.update(profile_id, ProfileUpdate(fingerprint=new_fp))
     cookie_store.clear(profile_id)
     if req.seed_cookies > 0:
@@ -629,6 +696,49 @@ def bulk_create(req: BulkCreateRequest) -> dict[str, Any]:
             cookie_store.save(profile.id, cookie_store.generate_random(count=req.seed_cookies))
         created.append(_with_status(profile))
     return {"created": len(created), "profiles": created}
+
+
+# ------------------------------------------------------- profile import/export --
+# A portable JSON bundle of profiles (settings, pinned fingerprint, proxies and
+# staged cookies) for backups or moving profiles to another machine. Browser
+# storage (history, logins, cache) stays on disk and is not included.
+
+_EXPORT_VERSION = 1
+
+
+@app.get("/api/profiles-export")
+def export_profiles(ids: str = "") -> dict[str, Any]:
+    wanted = [i for i in ids.split(",") if i] if ids else None
+    out = []
+    for profile in db.list_all():
+        if wanted is not None and profile.id not in wanted:
+            continue
+        data = profile.model_dump()
+        data["cookies"] = cookie_store.load(profile.id)
+        out.append(data)
+    return {"manyfaces_export": _EXPORT_VERSION, "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "profiles": out}
+
+
+class ImportPayload(BaseModel):
+    profiles: list[dict[str, Any]]
+
+
+@app.post("/api/profiles-import", status_code=201)
+def import_profiles(payload: ImportPayload) -> dict[str, Any]:
+    """Create profiles from an export bundle. Each gets a NEW id (so importing twice,
+    or into the machine it came from, never overwrites an existing profile)."""
+    created, errors = [], []
+    for i, raw in enumerate(payload.profiles):
+        data = {k: v for k, v in raw.items() if k not in ("id", "created_at", "updated_at", "status", "running", "launch_error", "cookies")}
+        try:
+            profile = db.create(Profile.model_validate(data))
+        except Exception as exc:  # noqa: BLE001 - report bad entries, keep importing the rest
+            errors.append(f"#{i + 1}: {type(exc).__name__}: {str(exc).splitlines()[0]}")
+            continue
+        if raw.get("cookies"):
+            cookie_store.save(profile.id, raw["cookies"])
+        created.append(_with_status(profile))
+    return {"created": len(created), "errors": errors, "profiles": created}
 
 
 # ------------------------------------------------------------------ cookies ---

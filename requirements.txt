@@ -8,9 +8,10 @@ python-multipart>=0.0.9
 # Desktop app shell (native window via OS WebView2/EdgeChromium)
 pywebview>=5.0
 
-# Anti-detect browser engine (patched Firefox, native-level fingerprint spoofing)
-camoufox[geoip]>=0.4.0
-browserforge>=1.2.0
+# Anti-detect browser engine (patched Firefox, native-level fingerprint spoofing).
+# 0.5+ replaced BrowserForge with fpgen and validates every WebGL pair; the app is
+# built against that API (0.4.x still works through fallbacks, but isn't tested).
+camoufox[geoip]>=0.5.8,<0.6
 
 # Chromium engine option (Playwright). Camoufox already pulls Playwright in, but we
 # depend on it directly since it's a first-class engine here. For the Chromium

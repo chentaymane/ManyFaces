@@ -15,22 +15,50 @@ from typing import Any
 # Short OS names used by Camoufox's WebGL/font databases.
 _OS_SHORT = {"windows": "win", "macos": "mac", "linux": "lin"}
 
-# Fallback WebGL pairs (only used if Camoufox's own GPU database isn't importable).
+# Fallback WebGL pairs, used only when Camoufox's GPU database isn't importable at
+# all (engine package missing). Strings match Camoufox 0.5's database verbatim —
+# it matches pairs exactly, trailing ", or similar" included. A stored pair the
+# installed database doesn't know is re-resolved at launch (`resolve_webgl_pair`).
 _WEBGL_FALLBACK = {
     "windows": [
-        ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0)"),
-        ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0)"),
-        ("Google Inc. (AMD)", "ANGLE (AMD, Radeon R9 200 Series Direct3D11 vs_5_0 ps_5_0)"),
+        ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0), or similar"),
+        ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar"),
+        ("Google Inc. (AMD)", "ANGLE (AMD, Radeon R9 200 Series Direct3D11 vs_5_0 ps_5_0), or similar"),
     ],
-    "macos": [("Apple", "Apple M1")],
-    "linux": [("Intel", "Mesa Intel(R) UHD Graphics 620 (KBL GT2)")],
+    "macos": [("Apple", "Apple M1, or similar")],
+    "linux": [("Intel", "Intel(R) HD Graphics, or similar")],
 }
 
-# Common desktop resolutions (width, height).
-_SCREENS = [
-    (1920, 1080), (1536, 864), (1366, 768), (2560, 1440),
-    (1440, 900), (1600, 900), (1680, 1050), (1280, 720),
-]
+# Common desktop resolutions (width, height) per OS. Macs get Mac panels (incl. the
+# Apple Silicon built-ins) rather than Windows-laptop sizes like 1366x768.
+_SCREENS = {
+    "windows": [
+        (1920, 1080), (1920, 1080), (1536, 864), (1366, 768), (2560, 1440),
+        (1440, 900), (1600, 900), (1680, 1050), (1280, 720), (1920, 1200),
+    ],
+    "macos": [
+        (1440, 900), (1512, 982), (1470, 956), (1728, 1117), (1920, 1080),
+        (2560, 1440), (1680, 1050), (1280, 832),
+    ],
+    "linux": [
+        (1920, 1080), (1920, 1080), (2560, 1440), (1366, 768), (1600, 900),
+        (1680, 1050), (1920, 1200), (1440, 900),
+    ],
+}
+
+# Device-pixel ratios each desktop OS actually offers (mirrors Camoufox's
+# coherence rules, so a stored value is never "repaired" into something else).
+_DPR_BY_OS = {
+    "windows": [1.0, 1.0, 1.25, 1.5, 2.0],
+    "macos": [1.0, 2.0, 2.0],
+    "linux": [1.0, 1.0, 1.25, 1.5, 2.0],
+}
+
+# Core counts an Apple Silicon Mac ships with.
+_APPLE_SILICON_CORES = [8, 8, 10, 10, 12, 16]
+
+# Taskbar / menu-bar height per OS: screen.availHeight = height - this.
+_TASKBAR = {"windows": 48, "macos": 25, "linux": 0}
 
 # (language, region, timezone) that hang together geographically.
 _LOCALES = [
@@ -47,7 +75,6 @@ _LOCALES = [
 ]
 
 _CORES = [4, 6, 8, 8, 12, 16]
-_DEVICE_PIXEL_RATIOS = [1.0, 1.0, 1.25, 1.5, 2.0]
 _SAMPLE_RATES = [44100, 48000]
 _DNT = ["unspecified", "1", "0"]
 _OS_CHOICES = ["windows", "macos", "linux"]
@@ -116,8 +143,19 @@ _IOS_FONTS = [
 ]
 
 
-def _firefox_major() -> str:
-    """Major Firefox version of the installed Camoufox, for a matching mobile UA."""
+def _firefox_major(executable_path: str | None = None) -> str:
+    """Major Firefox version of the Camoufox build that will run, for a matching UA.
+
+    With a bundled/explicit binary its own application.ini is authoritative;
+    otherwise it's the build `camoufox fetch` installed.
+    """
+    if executable_path:
+        try:
+            from camoufox.utils import resolve_verstr
+
+            return resolve_verstr(executable_path).split(".", 1)[0]
+        except Exception:  # noqa: BLE001 - older camoufox; fall through
+            pass
     try:
         from camoufox.pkgman import installed_verstr
 
@@ -126,33 +164,136 @@ def _firefox_major() -> str:
         return "135"
 
 
-def _sample_webgl(os_name: str, rng) -> tuple[str, str]:
+# navigator.* values a stock desktop Firefox reports per OS:
+# (UA platform token, navigator.platform, navigator.oscpu, appVersion).
+_FIREFOX_DESKTOP = {
+    "windows": ("Windows NT 10.0; Win64; x64", "Win32", "Windows NT 10.0; Win64; x64", "5.0 (Windows)"),
+    "macos": ("Macintosh; Intel Mac OS X 10.15", "MacIntel", "Intel Mac OS X 10.15", "5.0 (Macintosh)"),
+    "linux": ("X11; Linux x86_64", "Linux x86_64", "Linux x86_64", "5.0 (X11)"),
+}
+
+
+def firefox_desktop_navigator(os_name: str, major: str) -> dict[str, str]:
+    """The navigator identity of a stock desktop Firefox `major` on `os_name`."""
+    token, platform, oscpu, app_version = _FIREFOX_DESKTOP.get(os_name, _FIREFOX_DESKTOP["windows"])
+    return {
+        "navigator.userAgent": f"Mozilla/5.0 ({token}; rv:{major}.0) Gecko/20100101 Firefox/{major}.0",
+        "navigator.platform": platform,
+        "navigator.oscpu": oscpu,
+        "navigator.appVersion": app_version,
+    }
+
+
+def with_firefox_major(user_agent: str, major: str) -> str:
+    """Rewrite a stored Firefox UA's version tokens to the engine that actually runs.
+
+    A UA claiming another Firefox than the one answering is a feature-detection
+    tell, and the engine gets upgraded under existing profiles.
+    """
+    import re
+
+    if "Firefox/" not in user_agent:
+        return user_agent  # e.g. the iOS Safari UA: no Gecko version to align
+    ua = re.sub(r"rv:\d+(\.\d+)?", f"rv:{major}.0", user_agent)
+    ua = re.sub(r"Gecko/\d+\.\d+", f"Gecko/{major}.0", ua)  # mobile form
+    return re.sub(r"Firefox/\d+(\.\d+)?", f"Firefox/{major}.0", ua)
+
+
+def _gpu_db():
+    """Camoufox's real-device GPU database API (0.5+), or None if unavailable."""
+    try:
+        from camoufox import webgl
+
+        if hasattr(webgl, "firefox_gpus"):
+            return webgl
+    except Exception:  # noqa: BLE001 - engine package missing/broken
+        pass
+    return None
+
+
+def webgl_pairs(os_name: str) -> list[tuple[str, str]]:
+    """Every (vendor, renderer) Camoufox will accept for this desktop OS.
+
+    Software rasterisers and the resistFingerprinting mask are excluded — no
+    consumer machine reports them, and they're a classic bot tell. Sorted, so a
+    seeded pick is stable across runs.
+    """
+    db = _gpu_db()
+    if db is None:
+        return []
+    short = _OS_SHORT.get(os_name, "win")
+    try:
+        from camoufox.coherence import gpu_fits_os
+        from camoufox.fingerprints import is_software_renderer
+    except Exception:  # noqa: BLE001
+        gpu_fits_os = lambda r, o: True  # noqa: E731
+        is_software_renderer = lambda r: False  # noqa: E731
+    try:
+        pairs = db.firefox_gpus(short)
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted(
+        (v, r) for v, r in pairs
+        if r and r != "Mozilla" and not is_software_renderer(r) and gpu_fits_os(r, short)
+    )
+
+
+def resolve_webgl_pair(os_name: str, vendor: str, renderer: str, seed: str | int = 0) -> tuple[str, str]:
+    """Return (vendor, renderer) if Camoufox accepts it, else a valid pair for this OS.
+
+    Camoufox 0.5+ rejects (and aborts the launch on) any pair its database doesn't
+    hold, by exact match. Profiles created against an older database can hold such
+    pairs, so we swap in a valid one — chosen deterministically from `seed` (the
+    profile id), so the GPU stays the same on every launch.
+    """
+    pairs = webgl_pairs(os_name)
+    if not pairs or (vendor, renderer) in pairs:
+        return vendor, renderer
+    import random as _random
+
+    # Prefer a GPU from the same vendor family so a migrated profile changes as
+    # little as possible.
+    family = [p for p in pairs if vendor and p[0] == vendor] or pairs
+    return _random.Random(f"{seed}|{os_name}").choice(family)
+
+
+def _sample_webgl(os_name: str, rng, width: int | None = None, height: int | None = None,
+                  cores: int | None = None) -> tuple[str, str]:
     """Return a valid (vendor, renderer) pair for this OS.
 
-    Prefers Camoufox's own real-GPU database (guaranteed accepted by `webgl_config`);
-    falls back to a small static list of DB-valid pairs on ANY failure (Camoufox not
-    installed, data file missing in a frozen build, etc.) so profile creation can
-    never crash on this.
+    Uses Camoufox's own real-GPU database, weighted the way real Firefox users
+    report it and kept coherent with the screen and core count (no discrete desktop
+    GPU behind a netbook panel, no Intel Mac GPU beside Apple Silicon hardware).
+    Falls back to a uniform pick from the valid pairs, then to a small static list,
+    so profile creation can never crash on this.
     """
-    try:
-        from camoufox.webgl import sample_webgl
-
-        data = sample_webgl(_OS_SHORT.get(os_name, "win"))
-        vendor, renderer = data.get("webGl:vendor", ""), data.get("webGl:renderer", "")
-        if vendor and renderer:
-            return vendor, renderer
-    except Exception:  # noqa: BLE001
-        pass
+    db = _gpu_db()
+    short = _OS_SHORT.get(os_name, "win")
+    if db is not None and hasattr(db, "sample_webgl_for_screen"):
+        try:
+            data = db.sample_webgl_for_screen(short, width, height, seed=rng.getrandbits(32), cores=cores)
+            vendor, renderer = data.get("webGl:vendor", ""), data.get("webGl:renderer", "")
+            if vendor and renderer:
+                return vendor, renderer
+        except Exception:  # noqa: BLE001
+            pass
+    pairs = webgl_pairs(os_name)
+    if pairs:
+        return rng.choice(pairs)
     return rng.choice(_WEBGL_FALLBACK.get(os_name, _WEBGL_FALLBACK["windows"]))
 
 
 def _sample_fonts(os_name: str, rng) -> list[str]:
-    """Return a plausible font set for this OS from Camoufox's font database.
+    """Return a plausible font set for this OS (Camoufox 0.4.x only).
 
-    Real machines share most system fonts, so we keep the large common base and
-    randomly drop only a handful — enough per-profile variation to individualise
-    without producing an implausibly tiny (and thus suspicious) font list.
+    Camoufox 0.5+ draws a realistic per-identity font set itself (an OS base plus
+    measured-probability add-ons, aware of the host's own fonts), seeded by the
+    pinned identity so it's identical every launch — so desktop profiles leave it
+    to Camoufox and store no list. On 0.4.x we keep the old behaviour: the large
+    common base with a handful randomly dropped.
     """
+    if _gpu_db() is not None:
+        return []
     try:
         import camoufox
         import json
@@ -230,13 +371,23 @@ class Fingerprint:
     def locale(self) -> str:
         return f"{self.language},{self.language.split('-')[0]}"
 
-    def camoufox_config(self) -> dict[str, Any]:
+    def camoufox_config(self, ff_major: str | None = None) -> dict[str, Any]:
         """All native property overrides pinned via Camoufox's `config` argument.
 
-        Screen/window dimensions and WebGL are handled separately (the `screen`
-        constraint and `webgl_config` args respectively), so they are not here.
-        Every key below is validated against Camoufox's property list.
+        The whole visible identity is pinned — navigator, screen, hardware, locale
+        and the noise vectors — so the profile is the same machine every launch.
+        Pinning `navigator.userAgent` matters twice over: Camoufox 0.5+ only treats
+        a caller's config as a fixed identity (stable salt for every value it draws
+        itself: voices, fonts, GL parameters, media devices, noise seeds) when it
+        names the UA; without it all of those are re-rolled on each launch.
+
+        WebGL is NOT here: desktop GPUs go through the validated `webgl_config`
+        argument, and phone GPUs (absent from Camoufox's desktop-only database)
+        are written into the final config after validation (see browser.py).
+        `ff_major` is the Firefox major of the engine that will run; the UA must
+        name it, or feature detection gives the spoof away.
         """
+        ff = ff_major or _firefox_major()
         cfg: dict[str, Any] = {
             "navigator.hardwareConcurrency": self.hardware_concurrency,
             "navigator.doNotTrack": self.do_not_track,
@@ -248,7 +399,6 @@ class Fingerprint:
             "AudioContext:maxChannelCount": self.audio_channels,
             "canvas:aaOffset": self.canvas_aa_offset,
             "canvas:aaCapOffset": self.canvas_aa_cap_offset,
-            "fonts": self.fonts,
             "fonts:spacing_seed": self.fonts_spacing_seed,
             "battery:charging": self.battery_charging,
             "battery:level": self.battery_level,
@@ -259,13 +409,16 @@ class Fingerprint:
             "mediaDevices:speakers": self.speakers,
             "timezone": self.timezone,
         }
+        if self.fonts:
+            cfg["fonts"] = self.fonts
         if self.is_mobile:
             # Pin the phone identity directly. These land in `config` before
-            # Camoufox merges its (desktop) BrowserForge fingerprint, and its
-            # merge never overwrites keys we've already set — so ours win.
+            # Camoufox merges its (desktop) generated fingerprint, and its merge
+            # never overwrites keys we've already set — so ours win.
+            ua = with_firefox_major(self.user_agent, ff)
             cfg.update({
-                "navigator.userAgent": self.user_agent,
-                "navigator.appVersion": self.app_version,
+                "navigator.userAgent": ua,
+                "navigator.appVersion": _app_version(self.os, ua),
                 "navigator.appCodeName": "Mozilla",
                 "navigator.platform": self.platform,
                 "navigator.oscpu": self.oscpu,
@@ -279,27 +432,116 @@ class Fingerprint:
                 "window.outerHeight": self.screen_height,
                 "window.screenX": 0,
                 "window.screenY": 0,
-                # Mobile GPU strings (the GL parameter set stays desktop-derived;
-                # Camoufox ships no mobile GPU database). Set here rather than via
-                # the `webgl_config` arg, which validates against that DB and would
-                # reject a phone GPU.
-                "webGl:vendor": self.webgl_vendor,
-                "webGl:renderer": self.webgl_renderer,
+            })
+        else:
+            cfg.update(firefox_desktop_navigator(self.os, ff))
+            # macOS's menu bar sits on top (availTop 25); Windows' taskbar at the
+            # bottom. The window is placed maximised at the top-left of the
+            # available area, so its position is stable too.
+            top = 25 if self.os == "macos" else 0
+            cfg.update({
+                "screen.width": self.screen_width,
+                "screen.height": self.screen_height,
+                "screen.availWidth": self.screen_width,
+                "screen.availHeight": self.screen_height - _TASKBAR.get(self.os, 0),
+                "screen.availTop": top,
+                "screen.availLeft": 0,
+                "window.screenX": 0,
+                "window.screenY": top,
             })
         return cfg
+
+    def mobile_overrides(self, ff_major: str | None = None) -> dict[str, Any]:
+        """Phone values to force into the FINAL Camoufox config, after its checks.
+
+        Camoufox's coherence pass assumes a desktop: it would snap a 2.625 DPR to
+        2, zero the touch points on an iPhone's macOS base, and shrink the viewport
+        to make room for desktop window chrome. Its WebGL database is desktop-only
+        too, so the phone GPU can't pass validation. These are written back over
+        the validated config (see browser.py), natively — not via page JS.
+        """
+        if not self.is_mobile:
+            return {}
+        keys = (
+            "navigator.userAgent", "navigator.appVersion", "navigator.platform",
+            "navigator.oscpu", "navigator.maxTouchPoints", "navigator.hardwareConcurrency",
+            "screen.width", "screen.height", "screen.availWidth", "screen.availHeight",
+            "screen.colorDepth", "screen.pixelDepth", "window.devicePixelRatio",
+            "window.innerWidth", "window.innerHeight", "window.outerWidth",
+            "window.outerHeight", "window.screenX", "window.screenY",
+        )
+        cfg = self.camoufox_config(ff_major)
+        out = {k: cfg[k] for k in keys if k in cfg}
+        if self.webgl_vendor and self.webgl_renderer:
+            out["webGl:vendor"] = self.webgl_vendor
+            out["webGl:renderer"] = self.webgl_renderer
+        return out
 
     def webgl_config(self) -> tuple[str, str] | None:
         """The (vendor, renderer) pair for Camoufox's `webgl_config` argument.
 
-        Mobile profiles return None: their GPU strings are injected through the
-        `config` map instead (see `camoufox_config`), because `webgl_config`
-        validates against Camoufox's desktop-only GPU database.
+        Mobile profiles return None: Camoufox's GPU database is desktop-only, so
+        their GPU strings are written into the final config instead (see
+        `mobile_overrides`).
         """
         if self.is_mobile:
             return None
         if self.webgl_vendor and self.webgl_renderer:
             return (self.webgl_vendor, self.webgl_renderer)
         return None
+
+
+def _app_version(os_name: str, user_agent: str) -> str:
+    """navigator.appVersion as the real browser reports it for this UA.
+
+    Firefox reports a short platform form ("5.0 (Android 14)"); Safari reports
+    the UA minus its "Mozilla/" prefix.
+    """
+    if os_name == "android":
+        import re
+
+        m = re.search(r"Android (\d+)", user_agent)
+        return f"5.0 (Android {m.group(1) if m else '14'})"
+    return user_agent.split("Mozilla/", 1)[-1]
+
+
+def normalize(fp: Fingerprint, seed: str | int = 0) -> Fingerprint:
+    """Bring a stored fingerprint in line with what the installed Camoufox accepts.
+
+    Returns a NEW fingerprint (the input is untouched); callers compare with `==`
+    to decide whether to persist it. Fixes, deterministically per `seed`:
+      - a desktop GPU pair the current database doesn't hold (would abort launch);
+      - desktop values Camoufox's coherence pass would silently rewrite anyway
+        (a Mac with touch points or a 1.25 DPR, an Apple Silicon GPU with 6 cores
+        or 24-bit colour), so what the UI shows is what pages see;
+      - a stored desktop font list on 0.5+, where Camoufox draws a realistic,
+        host-aware per-identity set itself.
+    """
+    d = fp.to_dict()
+    if not fp.is_mobile:
+        if fp.webgl_vendor and fp.webgl_renderer:
+            d["webgl_vendor"], d["webgl_renderer"] = resolve_webgl_pair(
+                fp.os, fp.webgl_vendor, fp.webgl_renderer, seed=seed
+            )
+        allowed_dpr = sorted(set(_DPR_BY_OS.get(fp.os, _DPR_BY_OS["windows"])))
+        if fp.device_pixel_ratio not in allowed_dpr:
+            d["device_pixel_ratio"] = min(allowed_dpr, key=lambda v: abs(v - fp.device_pixel_ratio))
+        if d["color_depth"] not in (24, 30):
+            d["color_depth"] = 24
+        if fp.os == "macos":
+            d["max_touch_points"] = 0
+            if "Apple M" in d["webgl_renderer"]:
+                d["color_depth"] = 30
+                if d["hardware_concurrency"] not in _APPLE_SILICON_CORES:
+                    d["hardware_concurrency"] = min(
+                        (c for c in sorted(set(_APPLE_SILICON_CORES)) if c >= d["hardware_concurrency"]),
+                        default=16,
+                    )
+        if d["fonts"] and _gpu_db() is not None:
+            d["fonts"] = []
+    elif fp.os == "android":
+        d["app_version"] = _app_version("android", fp.user_agent)
+    return Fingerprint.from_dict(d)
 
 
 def list_mobile_devices() -> list[dict[str, Any]]:
@@ -347,7 +589,7 @@ def _generate_android(rng, device=None) -> Fingerprint:
         is_mobile=True,
         device_name=name,
         user_agent=ua,
-        app_version=ua.split("Mozilla/", 1)[-1],  # navigator.appVersion drops the prefix
+        app_version=_app_version("android", ua),
         platform="Linux armv8l",
         oscpu="Linux armv8l",
         screen_width=w,
@@ -473,9 +715,18 @@ def generate(
         return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)
 
-    vendor, renderer = _sample_webgl(os_name, rng)
-    w, h = rng.choice(_SCREENS)
+    w, h = rng.choice(_SCREENS[os_name])
     lang, region, tz = rng.choice(_LOCALES)
+    cores = rng.choice(_CORES)
+    vendor, renderer = _sample_webgl(os_name, rng, w, h, cores)
+    color_depth = rng.choice([24, 24, 24, 30])
+    touch = 0 if rng.random() < 0.85 else rng.choice([1, 5, 10])
+    if os_name == "macos":
+        touch = 0  # no Mac has a touchscreen
+        if "Apple M" in renderer:
+            # Apple Silicon: deep colour by default and at least 8 cores.
+            color_depth = 30
+            cores = rng.choice(_APPLE_SILICON_CORES)
 
     # Laptops carry a battery that discharges; desktops report charging & full.
     is_laptop = rng.random() < 0.6
@@ -493,14 +744,14 @@ def generate(
         screen_height=h,
         webgl_vendor=vendor,
         webgl_renderer=renderer,
-        hardware_concurrency=rng.choice(_CORES),
+        hardware_concurrency=cores,
         device_memory=rng.choice([4, 8, 8, 16, 16, 32]),
         language=lang,
         region=region,
         timezone=tz,
-        color_depth=rng.choice([24, 24, 24, 30]),
-        device_pixel_ratio=rng.choice(_DEVICE_PIXEL_RATIOS),
-        max_touch_points=0 if rng.random() < 0.85 else rng.choice([1, 5, 10]),
+        color_depth=color_depth,
+        device_pixel_ratio=rng.choice(_DPR_BY_OS[os_name]),
+        max_touch_points=touch,
         do_not_track=rng.choice(_DNT),
         audio_sample_rate=rng.choice(_SAMPLE_RATES),
         audio_channels=2,

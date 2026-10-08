@@ -11,12 +11,19 @@ We hand it: the profile's persistent user-data dir, its proxy, its OS/locale, an
 """
 from __future__ import annotations
 
+import json
 import threading
 import traceback
+import warnings
 from typing import Any, Optional
 
-from . import config, cookies as cookie_store
+from . import config, cookies as cookie_store, fingerprint as fp_mod
 from .models import Profile
+
+
+# Phone profiles deliberately expose only the phone's fonts; Camoufox warns about
+# that on every launch (it assumes a desktop identity), which is just noise here.
+warnings.filterwarnings("ignore", message="Disabling OS-specific fonts")
 
 
 class BrowserError(RuntimeError):
@@ -75,15 +82,21 @@ def effective_start_url(profile: Profile, fp) -> str:
 def activate_bundled_engine() -> bool:
     """If the app ships a bundled browser, make Camoufox use it without downloading.
 
-    Camoufox reads its version from INSTALL_DIR/version.json even when we pass an
-    explicit executable_path, so we copy that tiny file over from the bundle. The
-    browser binary itself stays in the bundle folder (pointed at via executable_path
-    in build_launch_options) — no multi-hundred-MB copy, no network.
-    Returns True if a bundled browser is present and now usable.
+    The binary stays in the bundle folder and is passed as `executable_path`.
+    Camoufox 0.5+ reads the version from the binary's own application.ini, so
+    nothing else is needed. Camoufox 0.4.x read INSTALL_DIR/version.json even with
+    an explicit path, so for it we copy that tiny file over (never on 0.5+, whose
+    versioned cache would treat a stray root version.json as a stale install and
+    wipe the directory). Returns True if a bundled browser is present.
     """
     bundle = config.bundled_browser_dir()
     if not bundle:
         return False
+    try:
+        import camoufox.multiversion  # noqa: F401 - 0.5+ layout: nothing to copy
+        return True
+    except ImportError:
+        pass
     version_src = bundle / "version.json"
     if not version_src.exists():
         return False
@@ -100,152 +113,244 @@ def activate_bundled_engine() -> bool:
         return False
 
 
-def _resolve_screen(os_name: str, width: int, height: int):
-    """Return a validated Screen constraint near the target size, or None.
+def _engine_exe() -> str | None:
+    """The Camoufox binary that will run: the bundled one, else Camoufox's choice."""
+    return config.bundled_browser_exe()
 
-    BrowserForge only knows *real* device resolutions, so an arbitrary band may
-    contain none and raise "No headers" at launch. We validate candidate bands here
-    with Camoufox's pure-Python fingerprint generator (no browser started), from
-    tightest-near-target to widest, and return the first that generates cleanly.
-    This means the actual launch never has to retry — which matters because a failed
-    Camoufox sync launch leaves an asyncio loop that would poison a retry.
-    """
+
+def engine_installed() -> bool:
+    """Whether a Camoufox browser is available to launch without a download."""
+    if _engine_exe():
+        return True
     try:
-        from browserforge.fingerprints import Screen
-        from camoufox.fingerprints import generate_fingerprint
-    except ImportError:
+        from camoufox.pkgman import installed_verstr
+
+        installed_verstr()
+        return True
+    except Exception:  # noqa: BLE001 - not installed / package missing
+        return False
+
+
+def _supported_properties(exe: str | None) -> dict[str, dict] | None:
+    """The engine's declared config properties (properties.json), or None if unknown."""
+    try:
+        from pathlib import Path
+
+        from camoufox.utils import _load_properties
+
+        return _load_properties(Path(exe) if exe else None)
+    except Exception:  # noqa: BLE001 - older/newer camoufox layout; skip filtering
         return None
 
-    bands = [
-        (max(1024, width - 160), width + 64, max(720, height - 120), height + 64),
-        (1280, 1920, 720, 1200),
-        (1024, 2560, 720, 1440),
-    ]
-    for mnw, mxw, mnh, mxh in bands:
-        screen = Screen(min_width=mnw, max_width=mxw, min_height=mnh, max_height=mxh)
-        try:
-            generate_fingerprint(screen=screen, os=os_name)
-            return screen
-        except Exception:  # noqa: BLE001 - this band has no real match, try wider
-            continue
+
+def _drop_unsupported(cfg: dict[str, Any], exe: str | None) -> None:
+    """Remove config keys the installed engine no longer reads.
+
+    Newer Camoufox builds retired several properties (canvas:aaOffset, battery:*,
+    fonts:spacing_seed, webrtc:localipv4, …) — they now handle those surfaces
+    natively. Passing them is a no-op that only spams "Skipping …" warnings, so we
+    keep them in the stored fingerprint (older engines still use them) but drop
+    them from the launch.
+    """
+    props = _supported_properties(exe)
+    if not props:
+        return
+    for key in list(cfg):
+        entry = props.get(key)
+        if entry is None or "removed" in entry:
+            cfg.pop(key, None)
+
+
+def _host_screen() -> tuple[int, int] | None:
+    """Usable size of the primary display, for sizing desktop windows to fit."""
+    try:
+        from screeninfo import get_monitors
+
+        mons = get_monitors()
+        primary = next((m for m in mons if getattr(m, "is_primary", False)), mons[0] if mons else None)
+        if primary:
+            return int(primary.width), int(primary.height)
+    except Exception:  # noqa: BLE001 - headless box / no display / screeninfo missing
+        pass
     return None
 
 
-def _apply_mobile_webgl(cfg: dict[str, Any], vendor: str, renderer: str, base_os: str = "lin") -> None:
-    """Make a mobile profile's WebGL report the phone GPU, masked AND unmasked.
+def _desktop_window(fp) -> tuple[int, int]:
+    """Outer window size for a desktop profile: maximised on its spoofed screen,
+    but never larger than the real display (else the window hangs off-screen)."""
+    w = fp.screen_width
+    h = fp.screen_height - fp_mod._TASKBAR.get(fp.os, 0)
+    host = _host_screen()
+    if host:
+        w = min(w, host[0])
+        h = min(h, max(480, host[1] - 48))
+    return w, h
 
-    Camoufox ships only a desktop GPU database, so we take a base bundle and rewrite
-    every place the vendor/renderer surface: the top-level strings and the UNMASKED
-    vendor/renderer parameters (GL enums 37445/37446) inside both the WebGL1 and
-    WebGL2 parameter maps — which is what fingerprinters actually read via
-    WEBGL_debug_renderer_info. The remaining GL params/extensions stay desktop-derived
-    (no mobile GPU data exists to source them from). We inject the whole bundle into
-    `cfg`, so Camoufox's own (desktop) sample never overwrites it.
 
-    `base_os` picks which desktop GPU family the untouched params come from — "mac"
-    for iOS (Apple GL params are the closest match to an iPhone), "lin" for Android.
+def _mobile_base_os(fp) -> str:
+    """The desktop OS Camoufox will treat a phone profile as.
+
+    Camoufox derives its target OS from the user agent, not the `os` argument, and
+    both phone UAs (Android, iOS) resolve to Linux — so WebGL validation, fonts and
+    the coherence rules all run against Linux.
     """
     try:
-        from camoufox.webgl import sample_webgl
-    except Exception:  # noqa: BLE001 - engine missing; skip, launch will report it
-        return
-    try:
-        bundle = sample_webgl(base_os)
+        from camoufox.utils import determine_ua_os
+
+        short = determine_ua_os(fp.user_agent)
+        return {"win": "windows", "mac": "macos", "lin": "linux"}.get(short, "linux")
     except Exception:  # noqa: BLE001
-        return
-    bundle.pop("webGl2Enabled", None)  # a control flag, not a config property
-    for pkey in ("webGl:parameters", "webGl2:parameters"):
-        params = bundle.get(pkey)
-        if isinstance(params, dict):
-            if "37445" in params:
-                params["37445"] = vendor    # UNMASKED_VENDOR_WEBGL
-            if "37446" in params:
-                params["37446"] = renderer  # UNMASKED_RENDERER_WEBGL
-    bundle["webGl:vendor"] = vendor
-    bundle["webGl:renderer"] = renderer
-    cfg.update(bundle)
+        return "linux"
+
+
+def _mobile_base_gpu(fp, seed: str) -> tuple[str, str]:
+    """A database-valid GPU for the desktop OS a phone is emulated on.
+
+    It only has to pass validation and supply the deep GL parameter set; the
+    phone's own vendor/renderer strings are written over it afterwards.
+    """
+    return fp_mod.resolve_webgl_pair(_mobile_base_os(fp), "", "", seed=seed)
 
 
 def build_launch_options(profile: Profile, headless: bool | None = None) -> dict[str, Any]:
-    """Build a single, pre-validated set of Camoufox launch options for a profile."""
+    """Build the Camoufox launch arguments for a profile (`Camoufox(**opts)` form).
+
+    Prefer `camoufox_launch_options()`, which runs these through Camoufox and then
+    applies the phone pins Camoufox's desktop-only validation can't accept.
+    """
     fp = profile.fingerprint.to_fingerprint()
     geoip_active = profile.geoip and profile.proxy.is_set
+    exe = _engine_exe()
+    ff_major = fp_mod._firefox_major(exe)
 
-    cfg = fp.camoufox_config()
+    cfg = fp.camoufox_config(ff_major)
     if geoip_active:
         # Let GeoIP derive the timezone from the proxy's exit IP so it can't
         # contradict the real network location; keep our pinned value otherwise.
         cfg.pop("timezone", None)
-    if profile.block_webrtc:
-        # WebRTC is fully blocked, so a spoofed local IP is moot and would only add
-        # a config value with nothing to apply to.
-        pass
-    elif fp.webrtc_local_ipv4:
+    if not profile.block_webrtc and fp.webrtc_local_ipv4:
+        # Older engines only; newer ones retired this key (dropped below).
         cfg["webrtc:localipv4"] = fp.webrtc_local_ipv4
+    _drop_unsupported(cfg, exe)
 
     opts: dict[str, Any] = {
         "headless": False if headless is None else headless,
         "persistent_context": True,
-        # Don't let Playwright enforce its own viewport. Newer Playwright sends a
-        # `setDefaultViewport` with an `isMobile` field that the pinned Camoufox
-        # Firefox build's Juggler protocol rejects ("property isMobile ... not in
-        # this scheme"), which otherwise breaks EVERY launch. We pin screen/window
-        # dimensions ourselves (via config + the `window` option), so Playwright's
-        # viewport is redundant anyway.
+        # Don't let Playwright enforce its own viewport: Juggler rejects its
+        # `isMobile` field and a spoofed window size deadlocks it. We pin screen and
+        # window dimensions ourselves (config + the `window` option).
         "no_viewport": True,
         "user_data_dir": str(config.profile_data_dir(profile.id)),
         # Camoufox only accepts desktop OS names, so a phone profile runs on the
-        # nearest desktop engine with its identity spoofed via `config`: Android on
-        # Linux (both Gecko/ARM-ish), iOS on macOS (Apple GPU + Apple GL params).
-        "os": ("macos" if fp.os == "ios" else "linux") if fp.is_mobile else fp.os,
+        # desktop base its UA maps to (Linux) with its identity pinned via `config`.
+        "os": _mobile_base_os(fp) if fp.is_mobile else fp.os,
         "locale": fp.locale,
         "humanize": profile.humanize,
         "block_webrtc": profile.block_webrtc,
         "geoip": geoip_active,
         "config": cfg,
+        # Every manual pin above is deliberate (that's what keeps a profile the same
+        # device); don't print a LeakWarning for each one on every launch.
+        "i_know_what_im_doing": True,
     }
-    bundled_exe = config.bundled_browser_exe()
-    if bundled_exe:
-        opts["executable_path"] = bundled_exe  # use the shipped browser, never download
-    webgl = fp.webgl_config()
-    if webgl is not None:
-        opts["webgl_config"] = webgl  # pins GPU consistently across launches
+    if exe:
+        opts["executable_path"] = exe  # use the shipped browser, never download
     if fp.is_mobile:
-        # Size the real window to the phone and expose ONLY Android fonts
+        # Validation-only base GPU; the phone's strings replace it after launch
+        # options are built (mobile_overrides).
+        opts["webgl_config"] = _mobile_base_gpu(fp, profile.id)
+        # Size the real window to the phone and expose ONLY the phone's fonts
         # (custom_fonts_only stops Camoufox merging the desktop font set, which
-        # would otherwise leak a desktop identity). Screen dims are pinned in
-        # `cfg`, so no BrowserForge Screen constraint is used here.
-        _apply_mobile_webgl(
-            cfg, fp.webgl_vendor, fp.webgl_renderer,
-            base_os="mac" if fp.os == "ios" else "lin",
-        )
+        # would otherwise leak a desktop identity).
         opts["window"] = (fp.screen_width, fp.screen_height)
         if fp.fonts:
             opts["fonts"] = fp.fonts
             opts["custom_fonts_only"] = True
         # Make it behave like a real phone, not just a narrow desktop window:
-        # enable native touch events (so `ontouchstart`, `TouchEvent`,
-        # `pointer: coarse` and `hover: none` all report like a touchscreen) and
-        # honour the meta-viewport tag so pages render their true mobile layout.
-        # Without these a phone UA still gets served/rendered as desktop.
+        # native touch events (`ontouchstart`, `TouchEvent`, `pointer: coarse`,
+        # `hover: none`) and the meta-viewport tag, so pages render their true
+        # mobile layout. Without these a phone UA still gets a desktop layout.
         opts["firefox_user_prefs"] = {
             "dom.w3c_touch_events.enabled": 1,
             "dom.w3c_touch_events.legacy_apis.enabled": True,
             "dom.meta-viewport.enabled": True,
             "apz.allow_zooming": True,
             # Report a touchscreen's pointer to CSS: primary/all pointer = coarse
-            # (bit 0x01), no hover. This flips `pointer: coarse` / `hover: none` /
-            # `any-hover: none` true — the media queries mobile sites switch on.
+            # (bit 0x01), no hover.
             "ui.primaryPointerCapabilities": 1,
             "ui.allPointerCapabilities": 1,
         }
     else:
-        screen = _resolve_screen(fp.os, fp.screen_width, fp.screen_height)
-        if screen is not None:
-            opts["screen"] = screen
+        webgl = fp.webgl_config()
+        if webgl is not None:
+            # Camoufox 0.5+ aborts the launch on a pair its database doesn't hold;
+            # normalize() has already migrated stored profiles, this is a backstop.
+            opts["webgl_config"] = fp_mod.resolve_webgl_pair(fp.os, *webgl, seed=profile.id)
+        opts["window"] = _desktop_window(fp)
     if profile.proxy.is_set:
         opts["proxy"] = profile.proxy.playwright_dict()
     return opts
+
+
+def _read_camou_config(env: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    keys = sorted((k for k in env if k.startswith("CAMOU_CONFIG_")), key=lambda k: int(k.rsplit("_", 1)[1]))
+    blob = "".join(str(env[k]) for k in keys)
+    return (json.loads(blob) if blob else {}), keys
+
+
+def _write_camou_config(env: dict[str, Any], cfg: dict[str, Any], old_keys: list[str]) -> None:
+    for k in old_keys:
+        env.pop(k, None)
+    blob = json.dumps(cfg, ensure_ascii=False, separators=(",", ":"))
+    # 2047 is Windows' per-variable limit Camoufox chunks to; safe everywhere.
+    size = 2047
+    for i in range(0, len(blob), size):
+        env[f"CAMOU_CONFIG_{i // size + 1}"] = blob[i:i + size]
+
+
+def _apply_overrides(from_options: dict[str, Any], overrides: dict[str, Any]) -> None:
+    """Write values into the final, already-validated Camoufox config (natively —
+    the browser reads them from its environment at startup, no page JS)."""
+    if not overrides:
+        return
+    env = dict(from_options.get("env") or {})
+    cfg, keys = _read_camou_config(env)
+    cfg.update(overrides)
+    renderer = overrides.get("webGl:renderer")
+    if renderer:
+        vendor = overrides.get("webGl:vendor", "")
+        for pkey in ("webGl:parameters", "webGl2:parameters"):
+            params = cfg.get(pkey)
+            if isinstance(params, dict):
+                params["7937"] = renderer  # RENDERER (Firefox reports the real one)
+                if "37445" in params:
+                    params["37445"] = vendor  # UNMASKED_VENDOR_WEBGL
+                if "37446" in params:
+                    params["37446"] = renderer  # UNMASKED_RENDERER_WEBGL
+    _write_camou_config(env, cfg, keys)
+    from_options["env"] = env
+
+
+def camoufox_launch_options(profile: Profile, headless: bool | None = None) -> dict[str, Any]:
+    """Final Playwright launch options for a Camoufox profile.
+
+    Runs our arguments through Camoufox's own `launch_options()` (fingerprint
+    generation, validation, fonts, GeoIP, …), then writes the phone pins that its
+    desktop-only checks would reject or "repair" back into the result. Pass the
+    result to `Camoufox(from_options=…, persistent_context=True)`.
+    """
+    import inspect
+
+    from camoufox.utils import launch_options
+
+    opts = build_launch_options(profile, headless=headless)
+    opts.pop("persistent_context", None)
+    if "pin_cpu_cores" in inspect.signature(launch_options).parameters:
+        opts["pin_cpu_cores"] = False  # what Camoufox's own launcher defaults to
+    from_options = launch_options(**opts)
+    fp = profile.fingerprint.to_fingerprint()
+    _apply_overrides(from_options, fp.mobile_overrides(fp_mod._firefox_major(_engine_exe())))
+    return from_options
 
 
 # --------------------------------------------------------------- chromium ----
@@ -454,6 +559,35 @@ def build_chromium_options(profile: Profile, pw) -> dict[str, Any]:
     return opts
 
 
+def log_error(where: str, detail: str) -> None:
+    """Append a traceback to ~/.antidetect/error.log (the windowed app has no console)."""
+    try:
+        config.ensure_dirs()
+        with (config.DATA_DIR / "error.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"--- {where} ---\n{detail}\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def friendly_error(exc: Exception) -> str:
+    """A one-glance explanation of a launch failure (full traceback goes to error.log)."""
+    name = type(exc).__name__
+    msg = str(exc).strip()
+    low = msg.lower()
+    if name == "CamoufoxNotInstalled" or "camoufox fetch" in low:
+        return "The Camoufox browser isn't installed. Click \"Download engine\" in the app, or run: python -m camoufox fetch"
+    if "executable doesn't exist" in low:
+        return "Chromium is not installed for Playwright. Run: python -m playwright install chromium"
+    if name == "InvalidProxy" or ("proxy" in low and ("refused" in low or "connect" in low)):
+        return f"The proxy didn't work: {msg.splitlines()[0] if msg else name}. Test it in the profile editor."
+    if "user data directory is already in use" in low or "profile appears to be in use" in low:
+        return "This profile's browser data is locked by another running browser. Close it and retry."
+    first = msg.splitlines()[0] if msg else ""
+    if len(first) > 400:
+        first = first[:400] + "…"
+    return f"{name}: {first}" if first else name
+
+
 class BrowserSession:
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
@@ -501,7 +635,8 @@ class BrowserSession:
             else:
                 self._run_camoufox()
         except Exception as exc:  # noqa: BLE001
-            self.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            self.error = friendly_error(exc)
+            log_error(f"launch {self.profile.id} ({self.profile.engine})", traceback.format_exc())
             self._ready.set()
 
     def _run_camoufox(self) -> None:
@@ -514,8 +649,17 @@ class BrowserSession:
             )
             self._ready.set()
             return
-        opts = build_launch_options(self.profile)
-        self._launch(Camoufox, opts)
+        if not engine_installed():
+            # Without this, Camoufox silently starts a ~1.3 GB download inside the
+            # launch with no progress shown — it looks like a hang.
+            self.error = (
+                "The Camoufox browser isn't downloaded yet. Click \"Download engine\" "
+                "in the banner at the top of the app (or run: python -m camoufox fetch)."
+            )
+            self._ready.set()
+            return
+        from_options = camoufox_launch_options(self.profile)
+        self._launch(Camoufox, from_options)
 
     def _run_chromium(self) -> None:
         try:
@@ -577,8 +721,8 @@ class BrowserSession:
             except Exception:  # noqa: BLE001
                 pass
 
-    def _launch(self, Camoufox, opts: dict[str, Any]) -> None:
-        with Camoufox(**opts) as browser:
+    def _launch(self, Camoufox, from_options: dict[str, Any]) -> None:
+        with Camoufox(from_options=from_options, persistent_context=True) as browser:
             # With persistent_context=True the object *is* a BrowserContext.
             staged = cookie_store.load(self.profile.id)
             if staged:

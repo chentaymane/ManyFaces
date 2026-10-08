@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent
 DIST = PROJ / "dist"
-EXE = DIST / "ManyFaces.exe"
+EXE = DIST / ("ManyFaces.exe" if sys.platform == "win32" else "ManyFaces")
 OUT = DIST / "ManyFaces-Portable"
 ZIP = DIST / "ManyFaces-Portable.zip"
 
@@ -42,13 +42,28 @@ def log(m: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
-def main() -> None:
+def _installed_browser() -> Path | None:
+    """Folder of the active Camoufox install (0.5+ keeps versioned installs under
+    browsers/<repo>/<version>/; 0.4.x used the cache root)."""
+    try:
+        from camoufox.multiversion import get_active_path
+
+        active = get_active_path()
+        if active:
+            return Path(active)
+    except ImportError:
+        pass
     from camoufox.pkgman import INSTALL_DIR
 
-    browser_src = Path(str(INSTALL_DIR))
-    if not (browser_src / "camoufox.exe").exists():
-        log(f"ERROR: no installed browser at {browser_src}; run the app once to fetch it.")
+    return Path(str(INSTALL_DIR))
+
+
+def main() -> None:
+    browser_src = _installed_browser()
+    if not browser_src or not any((browser_src / n).exists() for n in ("camoufox.exe", "camoufox")):
+        log(f"ERROR: no installed browser at {browser_src}; run `python -m camoufox fetch` first.")
         sys.exit(1)
+    exe_name = "ManyFaces.exe" if sys.platform == "win32" else "ManyFaces"
     if not EXE.exists():
         log(f"ERROR: {EXE} not found; build it first (pyinstaller build.spec).")
         sys.exit(1)
@@ -58,9 +73,9 @@ def main() -> None:
     OUT.mkdir(parents=True)
 
     log("copying app exe...")
-    shutil.copy2(str(EXE), str(OUT / "ManyFaces.exe"))
+    shutil.copy2(str(EXE), str(OUT / exe_name))
 
-    log("copying browser engine (~940 MB, one-time)...")
+    log(f"copying browser engine from {browser_src} (~940 MB, one-time)...")
     t0 = time.time()
     shutil.copytree(str(browser_src), str(OUT / "browser"))
     log(f"browser copied in {time.time() - t0:.0f}s")

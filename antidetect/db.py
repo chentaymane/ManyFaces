@@ -91,6 +91,26 @@ def update(profile_id: str, patch: ProfileUpdate) -> Optional[Profile]:
     return profile
 
 
+def prepare_for_launch(profile: Profile) -> Profile:
+    """Migrate a stored fingerprint to what the installed engine accepts, in place.
+
+    Profiles created against an older Camoufox can hold values the current one
+    rejects (a GPU pair no longer in its database aborts the launch) or would
+    silently rewrite. `fingerprint.normalize` fixes them deterministically; the
+    result is persisted so the dashboard shows exactly what pages will see.
+    """
+    from .fingerprint import normalize
+    from .models import FingerprintModel
+
+    fp = profile.fingerprint.to_fingerprint()
+    fixed = normalize(fp, seed=profile.id)
+    if fixed != fp:
+        profile.fingerprint = FingerprintModel.from_fingerprint(fixed)
+        if get(profile.id):
+            update(profile.id, ProfileUpdate(fingerprint=profile.fingerprint))
+    return profile
+
+
 def delete(profile_id: str) -> bool:
     with _connect() as conn:
         cur = conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))

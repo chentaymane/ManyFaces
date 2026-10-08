@@ -13,11 +13,24 @@ async function api(path, opts = {}) {
   return data;
 }
 
+let toastTimer = null;
 function toast(msg, kind = "ok") {
   const t = $("#toast");
   t.textContent = msg;
   t.className = `toast ${kind}`;
-  setTimeout(() => t.classList.add("hidden"), 3200);
+  clearTimeout(toastTimer);  // an older toast's timer must not hide this one early
+  toastTimer = setTimeout(() => t.classList.add("hidden"), kind === "err" ? 6000 : 3200);
+}
+
+// Save a JS value as a downloaded .json file.
+function downloadJSON(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
 }
 
 function esc(s) {
@@ -75,7 +88,7 @@ function renderList(profiles) {
     const msg = allProfiles.length
       ? `No profiles match. <a href="#" id="clear-filter">Clear filters</a>`
       : `No profiles yet. Click “+ New Profile” or “📱 New Phone”.`;
-    body.innerHTML = `<tr><td colspan="8" class="empty">${msg}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="empty">${msg}</td></tr>`;
     const cf = $("#clear-filter");
     if (cf) cf.onclick = (e) => { e.preventDefault(); activeFilter = "all"; $("#search").value = ""; renderStats(); applySearch(); };
     syncBulkBar();
@@ -91,19 +104,19 @@ function renderList(profiles) {
       : `<button class="sm primary" data-act="start" data-id="${p.id}">Launch</button>`;
     return `<tr class="${sel ? "sel" : ""}">
       <td class="col-check"><input type="checkbox" class="row-check" data-id="${p.id}" ${sel ? "checked" : ""} /></td>
-      <td><div class="name">${esc(p.name)}</div><div class="sub">${fp.screen_width}×${fp.screen_height}</div></td>
+      <td><div class="name" title="${esc(p.notes || "")}">${esc(p.name)}</div><div class="sub">${(p.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}${fp.screen_width}×${fp.screen_height}</div></td>
       <td>${deviceCell(fp)}<div class="sub">${engineBadge(p.engine)}</div></td>
       <td>${proxyCell(p)}</td>
-      <td class="hide-sm sub">${esc(fp.language)} · ${esc(fp.timezone)}</td>
-      <td class="hide-sm"><button class="sm ghost" data-act="cookies" data-id="${p.id}">Cookies</button></td>
+      <td class="hide-sm"><div>${esc(fp.language)}</div><div class="sub">${esc(fp.timezone)}</div></td>
       <td>${statusPill(p)}</td>
-      <td class="actions-cell">
+      <td class="actions-cell"><div class="actions">
         ${toggle}
         <button class="sm" data-act="randomize" data-id="${p.id}" title="Regenerate fingerprint + fresh cookie jar">🎲</button>
         <button class="sm" data-act="edit" data-id="${p.id}">Edit</button>
-        <button class="sm" data-act="clone" data-id="${p.id}">Clone</button>
-        <button class="sm danger" data-act="delete" data-id="${p.id}">Delete</button>
-      </td>
+        <button class="sm" data-act="cookies" data-id="${p.id}" title="Cookies: import / export / generate">🍪</button>
+        <button class="sm" data-act="clone" data-id="${p.id}" title="Clone profile">⧉</button>
+        <button class="sm danger" data-act="delete" data-id="${p.id}" title="Delete profile">🗑</button>
+      </div></td>
     </tr>`;
   }).join("");
   syncBulkBar();
@@ -116,7 +129,8 @@ function currentView() {
     if (activeFilter === "running" && !p.running) return false;
     if (["android", "chromium", "camoufox"].includes(activeFilter) && p.engine !== activeFilter) return false;
     if (!q) return true;
-    return (p.name + " " + fp.os + " " + (fp.device_name || "") + " " + fp.language).toLowerCase().includes(q);
+    return [p.name, fp.os, fp.device_name, fp.language, p.notes, ...(p.tags || [])]
+      .join(" ").toLowerCase().includes(q);
   });
 }
 
@@ -165,7 +179,7 @@ async function loadProfiles() {
     applySearch();
     if (allProfiles.some((p) => p.status === "launching")) ensurePolling();
   } catch (e) {
-    $("#profiles-body").innerHTML = `<tr><td colspan="8" class="empty">Error: ${esc(e.message)}</td></tr>`;
+    $("#profiles-body").innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -188,6 +202,14 @@ $("#bulk-bar").addEventListener("click", async (e) => {
   if (act === "clear") { selected.clear(); applySearch(); return; }
   const ids = [...selected];
   if (!ids.length) return;
+  if (act === "export") {
+    try {
+      const data = await api(`/api/profiles-export?ids=${encodeURIComponent(ids.join(","))}`);
+      downloadJSON(`manyfaces-${ids.length}-profiles.json`, data);
+      toast(`Exported ${ids.length} profile(s)`);
+    } catch (err) { toast(err.message, "err"); }
+    return;
+  }
   if (act === "delete" && !confirm(`Delete ${ids.length} profile(s) and all their data?`)) return;
   if (act === "randomize" && !confirm(`Regenerate fingerprint + cookies for ${ids.length} profile(s)?`)) return;
   b.disabled = true; const lbl = b.textContent; b.textContent = "…";
@@ -311,6 +333,8 @@ function readForm() {
     os: $("#f-os").value || null,
     engine: $("#f-engine").value || "camoufox",
     start_url: $("#f-url").value.trim() || "about:blank",
+    tags: $("#f-tags").value.split(",").map((t) => t.trim()).filter(Boolean),
+    notes: $("#f-notes").value.trim(),
     humanize: $("#f-humanize").checked,
     block_webrtc: $("#f-webrtc").checked,
     geoip: $("#f-geoip").checked,
@@ -331,6 +355,8 @@ function fillForm(p) {
   $("#f-engine").value = p?.engine || "camoufox";
   updateEngineHint();
   $("#f-url").value = p?.start_url || "about:blank";
+  $("#f-tags").value = (p?.tags || []).join(", ");
+  $("#f-notes").value = p?.notes || "";
   $("#f-humanize").checked = p ? p.humanize : true;
   $("#f-webrtc").checked = p ? p.block_webrtc : true;
   $("#f-geoip").checked = p ? p.geoip : true;
@@ -360,7 +386,7 @@ function renderFpPreview(fp) {
     `  CPU/RAM:   ${fp.hardware_concurrency} cores · ${fp.device_memory} GB\n` +
     `  Locale:    ${fp.language} (${fp.region}) · ${fp.timezone}\n` +
     `  Audio:     ${fp.audio_sample_rate} Hz · ${fp.audio_channels}ch\n` +
-    `  Fonts:     ${(fp.fonts || []).length} installed\n` +
+    `  Fonts:     ${(fp.fonts || []).length ? (fp.fonts.length + " installed") : "realistic per-identity set (drawn by Camoufox, stable)"}\n` +
     `  Media:     ${fp.webcams} cam · ${fp.micros} mic · ${fp.speakers} spk\n` +
     `  Touch:     ${fp.max_touch_points} points · DNT ${fp.do_not_track}`;
 }
@@ -397,6 +423,7 @@ $("#modal-save").addEventListener("click", async () => {
     }
     const common = {
       name: form.name, start_url: form.start_url, engine: form.engine, proxy: form.proxy,
+      tags: form.tags, notes: form.notes,
       proxy_mode: proxyMode, proxy_pool: pool,
       humanize: form.humanize, block_webrtc: form.block_webrtc, geoip: form.geoip,
     };
@@ -775,14 +802,21 @@ $("#android-cancel").addEventListener("click", () => { $("#android-modal").class
 
 // ------------------------------------------------------------------ cookies ---
 let cookieProfileId = null;
+async function refreshCookieInfo() {
+  const data = await api(`/api/profiles/${cookieProfileId}/cookies`);
+  $("#cookie-info").textContent = `This profile has ${data.cookies.length} staged cookie(s). They're injected into the browser on its next launch.`;
+  return data.cookies;
+}
 async function openCookies(id) {
   cookieProfileId = id;
-  const data = await api(`/api/profiles/${id}/cookies`);
-  $("#cookie-info").textContent = `This profile has ${data.cookies.length} staged cookie(s).`;
+  $("#cookie-json").value = "";
   $("#cookie-count").value = "10";
+  await refreshCookieInfo();
   $("#cookie-modal").classList.remove("hidden");
 }
-$("#cookie-close").addEventListener("click", () => $("#cookie-modal").classList.add("hidden"));
+const closeCookies = () => { $("#cookie-modal").classList.add("hidden"); loadProfiles(); };
+$("#cookie-close").addEventListener("click", closeCookies);
+$("#cookie-done").addEventListener("click", closeCookies);
 $("#cookie-add").addEventListener("click", async () => {
   const count = parseInt($("#cookie-count").value, 10);
   if (isNaN(count) || count < 1) return toast("Enter a positive number", "err");
@@ -791,8 +825,28 @@ $("#cookie-add").addEventListener("click", async () => {
       method: "POST", body: JSON.stringify({ count, domain: "example.com" }),
     });
     toast(`Added ${r.added} cookies (total ${r.count})`);
-    $("#cookie-modal").classList.add("hidden");
-    loadProfiles();
+    refreshCookieInfo();
+  } catch (e) { toast(e.message, "err"); }
+});
+$("#cookie-import").addEventListener("click", async () => {
+  let cookies;
+  try {
+    cookies = JSON.parse($("#cookie-json").value);
+    if (cookies && !Array.isArray(cookies) && Array.isArray(cookies.cookies)) cookies = cookies.cookies;
+    if (!Array.isArray(cookies)) throw new Error("expected a JSON array of cookies");
+  } catch (e) { return toast(`Invalid JSON: ${e.message}`, "err"); }
+  try {
+    const r = await api(`/api/profiles/${cookieProfileId}/cookies`, { method: "PUT", body: JSON.stringify({ cookies }) });
+    toast(`Imported ${r.count} cookie(s)${r.count < cookies.length ? ` (${cookies.length - r.count} skipped: no name/value)` : ""}`);
+    $("#cookie-json").value = "";
+    refreshCookieInfo();
+  } catch (e) { toast(e.message, "err"); }
+});
+$("#cookie-export").addEventListener("click", async () => {
+  try {
+    const cookies = await refreshCookieInfo();
+    const p = allProfiles.find((x) => x.id === cookieProfileId);
+    downloadJSON(`cookies-${(p?.name || cookieProfileId).replace(/[^\w.-]+/g, "_")}.json`, cookies);
   } catch (e) { toast(e.message, "err"); }
 });
 $("#cookie-clear").addEventListener("click", async () => {
@@ -800,14 +854,102 @@ $("#cookie-clear").addEventListener("click", async () => {
   try {
     await api(`/api/profiles/${cookieProfileId}/cookies`, { method: "DELETE" });
     toast("Cookies cleared");
-    $("#cookie-modal").classList.add("hidden");
-    loadProfiles();
+    refreshCookieInfo();
   } catch (e) { toast(e.message, "err"); }
 });
 
-// close any modal on backdrop click
+// --------------------------------------------------------- profile import ---
+$("#import-btn").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";  // let the same file be picked again later
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const profiles = Array.isArray(data) ? data : data.profiles;
+    if (!Array.isArray(profiles) || !profiles.length) throw new Error("no profiles in that file");
+    const r = await api("/api/profiles-import", { method: "POST", body: JSON.stringify({ profiles }) });
+    toast(`Imported ${r.created} profile(s)${r.errors.length ? `, ${r.errors.length} failed` : ""}`, r.errors.length ? "err" : "ok");
+    if (r.errors.length) console.warn("Import errors:", r.errors);
+    loadProfiles();
+  } catch (err) { toast(`Import failed: ${err.message}`, "err"); }
+});
+
+// ------------------------------------------------------------ engine setup ---
+// The Camoufox browser (~1.3 GB) downloads once. The server does it resumably
+// with progress; this banner starts it and shows how it's going.
+let enginePoll = null;
+const fmtMB = (b) => (b / 1048576).toFixed(0) + " MB";
+
+function renderEngine(st) {
+  const banner = $("#engine-banner");
+  if (st.installed) {
+    banner.classList.add("hidden");
+    return false;  // stop polling
+  }
+  banner.classList.remove("hidden");
+  banner.classList.toggle("err", st.phase === "error");
+  const bar = $("#engine-bar"), prog = $("#engine-progress"), btn = $("#engine-download");
+  if (st.downloading) {
+    prog.classList.remove("hidden-block");
+    btn.disabled = true;
+    if (st.phase === "extracting") {
+      $("#engine-title").textContent = "Installing Camoufox browser…";
+      $("#engine-sub").textContent = "Verifying and unpacking — almost done.";
+      prog.classList.add("indeterminate"); bar.style.width = "";
+    } else {
+      prog.classList.remove("indeterminate");
+      bar.style.width = `${st.percent || 0}%`;
+      $("#engine-title").textContent = `Downloading Camoufox browser… ${st.percent || 0}%`;
+      const eta = st.speed > 0 && st.total ? Math.round((st.total - st.downloaded) / st.speed) : null;
+      $("#engine-sub").textContent = st.total
+        ? `${fmtMB(st.downloaded)} of ${fmtMB(st.total)} · ${fmtMB(st.speed)}/s${eta !== null ? ` · ~${eta > 90 ? Math.round(eta / 60) + " min" : eta + " s"} left` : ""}`
+        : "Contacting GitHub…";
+    }
+    btn.textContent = "Downloading…";
+    return true;
+  }
+  prog.classList.add("hidden-block");
+  btn.disabled = false;
+  if (st.phase === "error") {
+    $("#engine-title").textContent = "Engine download failed";
+    $("#engine-sub").textContent = `${st.error || "Unknown error"} — Retry resumes where it stopped.`;
+    btn.textContent = "↻ Retry";
+  } else {
+    $("#engine-title").textContent = "Camoufox browser not downloaded yet";
+    $("#engine-sub").textContent = "One-time download (~1.3 GB). Needed to launch Camoufox profiles; Chromium and Android profiles work without it.";
+    btn.textContent = "⬇ Download engine";
+  }
+  return false;
+}
+
+async function checkEngine() {
+  try {
+    const keep = renderEngine(await api("/api/engine/status"));
+    if (keep && !enginePoll) enginePoll = setInterval(checkEngine, 1000);
+    if (!keep && enginePoll) {
+      clearInterval(enginePoll); enginePoll = null;
+      const st = await api("/api/engine/status");
+      if (st.installed) toast(`Camoufox ${st.version || ""} ready 🦊`);
+    }
+  } catch (_) { /* server restarting — try again on the next tick */ }
+}
+$("#engine-download").addEventListener("click", async () => {
+  try {
+    renderEngine(await api("/api/engine/ensure", { method: "POST" }));
+    if (!enginePoll) enginePoll = setInterval(checkEngine, 1000);
+  } catch (e) { toast(e.message, "err"); }
+});
+
+// close any modal on backdrop click or Escape
 $$(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.classList.add("hidden"); }));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const open = $$(".modal:not(.hidden)");
+  if (open.length) open[open.length - 1].classList.add("hidden");
+});
 
 // ---------------------------------------------------------------------- init ---
 loadProfiles();
+checkEngine();
 setInterval(loadProfiles, 5000);

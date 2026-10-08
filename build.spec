@@ -1,9 +1,9 @@
 # PyInstaller spec — builds a single-file ManyFaces.exe.
 #
-# The Camoufox *browser binary* (~150 MB) is NOT bundled; it downloads to the user
-# cache on first run (see the engine-setup overlay). We DO bundle the Camoufox and
-# BrowserForge Python packages and their data files (fonts, GeoIP db, fingerprint
-# models), the web UI, and uvicorn/pywebview runtime pieces.
+# The Camoufox *browser binary* (~1.3 GB archive) is NOT bundled; it downloads to the user
+# cache on first run (see the engine-setup banner). We DO bundle the Camoufox and
+# fpgen Python packages and their data files (fonts, voices, GPU/fingerprint
+# models, GeoIP db), the web UI, and uvicorn/pywebview runtime pieces.
 #
 #   pyinstaller build.spec --noconfirm
 
@@ -18,14 +18,12 @@ datas = [("web", "web")]
 binaries = []
 hiddenimports = []
 
-# Packages that ship data files and/or dynamic submodules.
-# apify_fingerprint_datapoints holds BrowserForge's network-definition zips, loaded
-# at import time — without them, importing camoufox/browserforge and launching a
-# browser both fail with a missing input-network-definition.zip.
+# Packages that ship data files and/or dynamic submodules. Camoufox 0.5+ generates
+# fingerprints with fpgen (BrowserForge is gone) and parses UAs with ua_parser.
 for pkg in (
     "camoufox",
-    "browserforge",
-    "apify_fingerprint_datapoints",
+    "fpgen",
+    "ua_parser",
     "playwright",   # ships driver/node.exe (~92 MB) that actually drives the browser
     "webview",
     "language_tags",
@@ -39,8 +37,8 @@ for pkg in (
     except Exception:
         pass  # optional packages (e.g. screeninfo) may be absent; skip cleanly
 
-# Belt-and-suspenders: Camoufox's runtime data (webgl_data.db, fonts.json,
-# GeoLite2-City.mmdb, browserforge.yml, launchServer.js) MUST be present, or
+# Belt-and-suspenders: Camoufox's runtime data (fonts.json, font/voice manifests,
+# fpgen-model.json, media-devices.json, launchServer.js, …) MUST be present, or
 # fingerprint generation and launch fail. Collect them explicitly too.
 datas += collect_data_files("camoufox", include_py_files=False)
 

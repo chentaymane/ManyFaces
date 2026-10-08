@@ -53,7 +53,7 @@ header {
 .brand-text span { color: var(--muted); font-size: 11.5px; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 
-main { padding: 24px 28px 60px; max-width: 1240px; margin: 0 auto; }
+main { padding: 24px 28px 60px; max-width: 1320px; margin: 0 auto; }
 
 /* ------------------------------------------------------------- stat cards --- */
 .stats { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -121,15 +121,15 @@ tbody tr.sel:hover { background: rgba(99,102,241,.2) !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ----------------------------------------------------------------- table ---- */
-.table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 th { color: var(--muted-2); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: var(--bg-2); }
 tbody tr { transition: background .1s; }
 tbody tr:hover { background: rgba(255,255,255,.02); }
 tr:last-child td { border-bottom: none; }
 td.empty { text-align: center; color: var(--muted); padding: 48px; }
-td .name { font-weight: 600; }
+td .name { font-weight: 600; min-width: 150px; }
 td .sub { color: var(--muted); font-size: 12px; }
 
 .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -152,7 +152,11 @@ td .sub { color: var(--muted); font-size: 12px; }
 .phone-device-info .chip.ok { color: var(--green); }
 .phone-device-info .chip.warn { color: #f0a26a; border-color: rgba(234,88,12,.4); }
 
-.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* The td stays a table cell (a flex td breaks row borders/alignment); the
+   buttons live in an inner flex row that never wraps. */
+td.actions-cell { white-space: nowrap; width: 1%; }
+.actions { display: flex; gap: 6px; justify-content: flex-end; }
+.bulk-bar.hidden { display: none; }
 
 /* --------------------------------------------------------------- buttons ---- */
 button {
@@ -244,32 +248,34 @@ legend { color: var(--text); font-size: 12.5px; font-weight: 600; padding: 0 8px
 
 .fp-preview { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 
+/* --------------------------------------------------------- engine banner ---- */
+.engine-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: linear-gradient(90deg, rgba(245,158,11,.12), var(--panel));
+  border: 1px solid rgba(245,158,11,.45); border-radius: var(--radius);
+  padding: 14px 18px; margin-bottom: 18px;
+}
+.engine-banner.err { border-color: var(--red); background: linear-gradient(90deg, rgba(239,68,68,.12), var(--panel)); }
+.engine-banner.hidden { display: none; }
+.engine-banner-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.engine-banner-text span { color: var(--muted); font-size: 12.5px; }
+.engine-banner button { flex-shrink: 0; }
+.progress { height: 6px; background: var(--bg-2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #8b5cf6); transition: width .4s ease; }
+.progress.indeterminate .progress-bar { width: 35%; animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { from { margin-left: -35%; } to { margin-left: 100%; } }
+
+/* tags under the profile name */
+.tag { display: inline-block; background: var(--accent-soft); color: #c7c9ff; border-radius: 6px; padding: 0 6px; font-size: 11px; margin-right: 4px; }
+
 /* ----------------------------------------------------------------- toast ---- */
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 13px 18px; z-index: 60; box-shadow: 0 10px 34px rgba(0,0,0,.5); max-width: 380px; }
 .toast.err { border-color: var(--red); }
 .toast.ok { border-color: var(--green); }
 
-/* ----------------------------------------------------- engine setup overlay - */
-.setup-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
-  background: rgba(8,10,16,.85); backdrop-filter: blur(4px); }
-.setup-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 16px;
-  padding: 40px 44px; text-align: center; width: 460px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
-.setup-logo { font-size: 46px; line-height: 1; margin-bottom: 8px; }
-.setup-card h2 { margin: 10px 0 6px; color: var(--text); font-size: 19px; font-weight: 600; }
-.setup-card p { color: var(--muted); font-size: 13px; margin: 6px 0; }
-.setup-err { color: var(--red) !important; }
-.progress-wrap { margin: 22px 0 10px; height: 10px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: 999px; overflow: hidden; }
-.progress-bar { height: 100%; width: 0%; border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), #8b5cf6); transition: width .3s ease; }
-.progress-bar.indeterminate { width: 35% !important; animation: slide 1.2s ease-in-out infinite; }
-@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
-.progress-stats { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-#setup-retry { margin-top: 18px; }
-
 @media (max-width: 720px) {
-  .actions-cell { justify-content: flex-start; }
+  .engine-banner { flex-direction: column; align-items: stretch; }
+  .actions { justify-content: flex-start; flex-wrap: wrap; }
   th.hide-sm, td.hide-sm { display: none; }
   .search { width: 140px; }
 }
