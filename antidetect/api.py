@@ -7,14 +7,15 @@ import os
 import shutil
 import threading
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import config, cookies as cookie_store, db, fingerprint as fp_gen, proxy as proxy_mod
+from . import __version__, config, cookies as cookie_store, db, fingerprint as fp_gen, proxy as proxy_mod
 from . import android as android_engine
 from .browser import manager, BrowserError
 from .models import (
@@ -24,24 +25,26 @@ from .models import (
     ProfileUpdate,
     Proxy,
     ProxyType,
+    Engine,
+    OperatingSystem,
 )
 
-app = FastAPI(title="ManyFaces", version="0.1.0")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app):
     config.ensure_dirs()
     db.init()
-
-
-@app.on_event("shutdown")
-def _shutdown() -> None:
-    # Android VMs are heavy real processes — don't leak them when the app closes.
     try:
-        android_engine.manager.stop_all()
-    except Exception:  # noqa: BLE001
-        pass
+        yield
+    finally:
+        # Both browser engines own processes that need graceful cleanup.
+        try:
+            manager.stop_all()
+        finally:
+            android_engine.manager.stop_all()
+
+
+app = FastAPI(title="ManyFaces", version=__version__, lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -134,6 +137,7 @@ def _probe_download(url: str):
 
     r = requests.get(url, headers={"Range": "bytes=0-0"}, stream=True, timeout=(15, 60))
     try:
+        r.raise_for_status()
         if r.status_code == 206 and "content-range" in r.headers:
             total = int(r.headers["content-range"].split("/")[-1])
             return total, True
@@ -183,6 +187,9 @@ def _download_resumable(
 
     import requests
 
+    if total <= 0 or segments <= 0 or retries <= 0:
+        raise ValueError("Download size, segments and retries must be positive")
+    segments = min(segments, total)
     seg_size = math.ceil(total / segments)
 
     # Reuse an existing partial file only if it's the right size; else start fresh.
@@ -193,6 +200,11 @@ def _download_resumable(
             fh.truncate(total)
         done = [0] * segments
         _save_meta(meta_path, done)
+
+    for idx, offset in enumerate(done):
+        length = max(0, min(seg_size, total - idx * seg_size))
+        if offset < 0 or offset > length:
+            done[idx] = 0
 
     lock = threading.Lock()
     save_state = {"t": time.time()}
@@ -219,15 +231,22 @@ def _download_resumable(
                 headers = {"Range": f"bytes={pos}-{end}"}
                 with requests.get(url, headers=headers, stream=True, timeout=(15, 60)) as r:
                     r.raise_for_status()
+                    expected_range = f"bytes {pos}-{end}/{total}"
+                    if r.status_code != 206 or r.headers.get("content-range") != expected_range:
+                        raise IOError("Server did not honor the requested download range")
                     with open(dest, "r+b") as fh:
                         fh.seek(pos)
                         for chunk in r.iter_content(262144):
                             if not chunk:
                                 continue
+                            if len(chunk) > end - (start + done[idx]) + 1:
+                                raise IOError("Server sent data beyond the requested range")
                             fh.write(chunk)
                             with lock:
                                 done[idx] += len(chunk)
                                 progress()
+                if start + done[idx] <= end:
+                    raise IOError("Download segment ended early")
                 return
             except Exception as exc:  # noqa: BLE001 - retry this segment from where it stalled
                 last_exc = exc
@@ -413,7 +432,13 @@ def _engine_manager(profile: Profile):
 
 
 def _is_running(profile_id: str) -> bool:
-    return manager.is_running(profile_id) or android_engine.manager.is_running(profile_id)
+    return any(m.status(profile_id) in ("running", "launching")
+               for m in (manager, android_engine.manager))
+
+
+def _require_stopped(profile_id: str) -> None:
+    if _is_running(profile_id):
+        raise HTTPException(409, "Stop the profile before changing its settings or fingerprint")
 
 
 def _live_status(profile: Profile) -> tuple[str, Optional[str]]:
@@ -453,6 +478,7 @@ def get_profile(profile_id: str) -> dict[str, Any]:
 
 @app.patch("/api/profiles/{profile_id}")
 def update_profile(profile_id: str, patch: ProfileUpdate) -> dict[str, Any]:
+    _require_stopped(profile_id)
     profile = db.update(profile_id, patch)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -461,6 +487,8 @@ def update_profile(profile_id: str, patch: ProfileUpdate) -> dict[str, Any]:
 
 @app.delete("/api/profiles/{profile_id}", status_code=204)
 def delete_profile(profile_id: str) -> None:
+    if not db.get(profile_id):
+        raise HTTPException(404, "Profile not found")
     manager.stop(profile_id)
     android_engine.manager.stop(profile_id)
     # Reclaim the ~3–4 GB AVD too, so deleting a profile doesn't orphan its device.
@@ -482,15 +510,24 @@ def clone_profile(profile_id: str) -> dict[str, Any]:
     data = src.model_dump()
     for key in ("id", "created_at", "updated_at"):
         data.pop(key, None)
-    data["name"] = f"{src.name} (copy)"
+    data["name"] = f"{src.name[:193]} (copy)"
     clone = db.create(Profile.model_validate(data))
     return _with_status(clone)
 
 
 # ------------------------------------------------------------ launch control --
 
+_launch_lock = threading.Lock()
+
+
 @app.post("/api/profiles/{profile_id}/start")
 def start_profile(profile_id: str) -> dict[str, Any]:
+    # Serialize the status check, proxy selection and session registration.
+    with _launch_lock:
+        return _start_profile(profile_id)
+
+
+def _start_profile(profile_id: str) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -505,14 +542,14 @@ def start_profile(profile_id: str) -> dict[str, Any]:
     # Resolve the effective proxy for this launch (random draw / rotate advance).
     eff_proxy, next_index = profile.select_proxy()
     profile.proxy = eff_proxy  # in-memory: what this session launches with
-    if next_index is not None:  # persist rotation so the next launch advances
-        db.update(profile_id, ProfileUpdate(rotation_index=next_index))
     try:
         # Non-blocking: returns immediately; the browser/device comes up in the
         # background. Only fast, definite failures (e.g. Android not installed) raise.
         _engine_manager(profile).start(profile)
     except (BrowserError, RuntimeError) as exc:
         raise HTTPException(502, str(exc))
+    if next_index is not None:
+        db.update(profile_id, ProfileUpdate(rotation_index=next_index))
     st, _ = _live_status(profile)
     return {
         "status": st,
@@ -533,6 +570,8 @@ def profile_status(profile_id: str) -> dict[str, Any]:
 
 @app.post("/api/profiles/{profile_id}/stop")
 def stop_profile(profile_id: str) -> dict[str, Any]:
+    if not db.get(profile_id):
+        raise HTTPException(404, "Profile not found")
     manager.stop(profile_id)
     android_engine.manager.stop(profile_id)
     return {"running": False, "status": "stopped"}
@@ -631,7 +670,7 @@ def list_devices() -> dict[str, Any]:
 
 
 @app.get("/api/fingerprint/generate")
-def generate_fp(os: str | None = None) -> dict[str, Any]:
+def generate_fp(os: OperatingSystem | None = None) -> dict[str, Any]:
     return fp_gen.generate(os_name=os).to_dict()
 
 
@@ -648,7 +687,8 @@ def _regenerate(profile: Profile, os_name: str | None) -> FingerprintModel:
 
 
 @app.post("/api/profiles/{profile_id}/fingerprint/randomize")
-def randomize_fp(profile_id: str, os: str | None = None) -> dict[str, Any]:
+def randomize_fp(profile_id: str, os: OperatingSystem | None = None) -> dict[str, Any]:
+    _require_stopped(profile_id)
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -658,13 +698,14 @@ def randomize_fp(profile_id: str, os: str | None = None) -> dict[str, Any]:
 
 
 class RandomizeAllRequest(BaseModel):
-    os: str | None = None
-    seed_cookies: int = 15  # random cookies to warm up the jar (0 = none)
+    os: OperatingSystem | None = None
+    seed_cookies: int = Field(default=15, ge=0, le=1000)
 
 
 @app.post("/api/profiles/{profile_id}/randomize-all")
 def randomize_all(profile_id: str, req: RandomizeAllRequest) -> dict[str, Any]:
     """Regenerate the entire fingerprint AND reseed a fresh random cookie jar."""
+    _require_stopped(profile_id)
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -677,11 +718,11 @@ def randomize_all(profile_id: str, req: RandomizeAllRequest) -> dict[str, Any]:
 
 
 class BulkCreateRequest(BaseModel):
-    count: int = 5
-    name_prefix: str = "Profile"
-    os: str | None = None          # None => random OS per profile
-    engine: str = "camoufox"       # browser engine for every created profile
-    seed_cookies: int = 15         # random cookies per profile (0 = none)
+    count: int = Field(default=5, ge=1, le=200)
+    name_prefix: str = Field(default="Profile", min_length=1, max_length=190, pattern=r"\S")
+    os: OperatingSystem | None = None
+    engine: Engine = "camoufox"
+    seed_cookies: int = Field(default=15, ge=0, le=1000)
 
 
 @app.post("/api/profiles/bulk", status_code=201)
@@ -720,7 +761,8 @@ def export_profiles(ids: str = "") -> dict[str, Any]:
 
 
 class ImportPayload(BaseModel):
-    profiles: list[dict[str, Any]]
+    manyfaces_export: int = Field(default=1, ge=1, le=1)
+    profiles: list[dict[str, Any]] = Field(max_length=200)
 
 
 @app.post("/api/profiles-import", status_code=201)
@@ -731,12 +773,21 @@ def import_profiles(payload: ImportPayload) -> dict[str, Any]:
     for i, raw in enumerate(payload.profiles):
         data = {k: v for k, v in raw.items() if k not in ("id", "created_at", "updated_at", "status", "running", "launch_error", "cookies")}
         try:
-            profile = db.create(Profile.model_validate(data))
+            profile = Profile.model_validate(data)
+            staged = raw.get("cookies", [])
+            if not isinstance(staged, list) or any(not isinstance(c, dict) for c in staged):
+                raise ValueError("cookies must be a list of cookie objects")
+            staged = cookie_store.normalise(staged)
+            profile = db.create(profile)
+            try:
+                if staged:
+                    cookie_store.save(profile.id, staged)
+            except OSError:
+                db.delete(profile.id)
+                raise
         except Exception as exc:  # noqa: BLE001 - report bad entries, keep importing the rest
             errors.append(f"#{i + 1}: {type(exc).__name__}: {str(exc).splitlines()[0]}")
             continue
-        if raw.get("cookies"):
-            cookie_store.save(profile.id, raw["cookies"])
         created.append(_with_status(profile))
     return {"created": len(created), "errors": errors, "profiles": created}
 
@@ -748,7 +799,7 @@ class CookiePayload(BaseModel):
 
 
 class RandomCookieRequest(BaseModel):
-    count: int = 10
+    count: int = Field(default=10, ge=0, le=1000)
     domain: str = "example.com"
 
 

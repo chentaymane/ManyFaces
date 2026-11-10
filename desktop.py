@@ -28,12 +28,12 @@ import uvicorn
 from antidetect import config
 
 
-def _server() -> None:
+def _make_server() -> uvicorn.Server:
     # Pass the app OBJECT, not an "antidetect.api:app" import string: uvicorn's
     # string-based import fails inside a frozen PyInstaller build.
     from antidetect.api import app
 
-    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
+    return uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT, log_level="warning"))
 
 
 def _choose_port(host: str, preferred: int) -> int:
@@ -86,29 +86,38 @@ def main() -> None:
     # we never collide with a leftover instance and connect to its stale server.
     config.PORT = _choose_port(config.HOST, config.PORT)
 
-    threading.Thread(target=_server, daemon=True).start()
+    server = _make_server()
+    server_thread = threading.Thread(target=server.run, daemon=True)
+    server_thread.start()
     if not _wait_for_port(config.HOST, config.PORT):
+        server.should_exit = True
+        server_thread.join(timeout=5)
         print(f"Server failed to start on {config.HOST}:{config.PORT}", file=sys.stderr)
         return
     print(f"ManyFaces running at http://{config.HOST}:{config.PORT}", flush=True)
 
-    import webview  # imported here so `--help`/import errors are clearer
+    try:
+        import webview  # imported here so `--help`/import errors are clearer
 
-    # Cache-bust the URL each launch so the WebView2/Edge engine can never serve a
-    # stale page (e.g. a first-run "engine not installed" state cached before the
-    # browser finished downloading).
-    url = f"http://{config.HOST}:{config.PORT}/?v={int(time.time())}"
-    webview.create_window(
-        "ManyFaces",
-        url,
-        width=1280,
-        height=860,
-        min_size=(960, 640),
-        confirm_close=True,
-    )
-    # private_mode=True (default) keeps no persistent cache between runs; gui=None
-    # auto-selects the platform backend (EdgeChromium/WebView2 on Windows).
-    webview.start(private_mode=True)
+        # Cache-bust the URL each launch so the WebView2/Edge engine can never serve a
+        # stale page (e.g. a first-run "engine not installed" state cached before the
+        # browser finished downloading).
+        url = f"http://{config.HOST}:{config.PORT}/?v={int(time.time())}"
+        webview.create_window(
+            "ManyFaces",
+            url,
+            width=1280,
+            height=860,
+            min_size=(960, 640),
+            confirm_close=True,
+        )
+        # private_mode=True (default) keeps no persistent cache between runs; gui=None
+        # auto-selects the platform backend (EdgeChromium/WebView2 on Windows).
+        webview.start(private_mode=True)
+    finally:
+        # Trigger FastAPI's shutdown cleanup before the daemon server disappears.
+        server.should_exit = True
+        server_thread.join(timeout=60)
 
 
 if __name__ == "__main__":

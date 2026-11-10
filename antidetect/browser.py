@@ -767,7 +767,7 @@ class SessionManager:
                 return  # already up or coming up — don't launch a second window
             session = BrowserSession(profile)
             self._sessions[profile.id] = session
-        session.start()
+            session.start()
 
     def stop(self, profile_id: str) -> bool:
         with self._lock:
@@ -790,10 +790,13 @@ class SessionManager:
         return session.error if session else None
 
     def running_ids(self) -> list[str]:
-        return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
+        with self._lock:
+            return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
 
     def stop_all(self) -> None:
-        for pid in list(self._sessions.keys()):
+        with self._lock:
+            ids = list(self._sessions)
+        for pid in ids:
             self.stop(pid)
 
 

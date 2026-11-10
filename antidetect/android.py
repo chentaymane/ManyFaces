@@ -833,8 +833,8 @@ class AndroidManager:
                 return
             s = AndroidSession(profile)
             self._sessions[profile.id] = s
-        from .browser import normalize_start_url
-        s.start(normalize_start_url(profile.start_url))  # non-blocking
+            from .browser import normalize_start_url
+            s.start(normalize_start_url(profile.start_url))  # non-blocking
 
     def stop(self, profile_id: str) -> bool:
         with self._lock:
@@ -857,10 +857,13 @@ class AndroidManager:
         return s.error if s else None
 
     def running_ids(self) -> list[str]:
-        return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
+        with self._lock:
+            return [pid for pid, s in self._sessions.items() if s.status in ("running", "launching")]
 
     def stop_all(self) -> None:
-        for pid in list(self._sessions.keys()):
+        with self._lock:
+            ids = list(self._sessions)
+        for pid in ids:
             self.stop(pid)
 
 

@@ -5,4 +5,4 @@ native-level fingerprint spoofing). Each profile is fully isolated: its own
 storage/cookies, its own coherent fingerprint, and its own proxy.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
