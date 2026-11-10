@@ -19,7 +19,7 @@
 
 * { box-sizing: border-box; }
 
-html, body { overflow-x: hidden; }
+html, body { overflow-x: hidden; min-height: 100%; background-color: var(--bg); }
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -274,8 +274,24 @@ legend { color: var(--text); font-size: 12.5px; font-weight: 600; padding: 0 8px
 .toast.ok { border-color: var(--green); }
 
 @media (max-width: 720px) {
+  header { flex-wrap: wrap; gap: 12px; padding: 14px 16px; }
+  .header-actions { flex-wrap: wrap; gap: 8px; }
+  .header-actions button { white-space: nowrap; }
+  main { padding: 20px 16px 40px; }
+  .brand-logo { flex-shrink: 0; }
   .engine-banner { flex-direction: column; align-items: stretch; }
-  .actions { justify-content: flex-start; flex-wrap: wrap; }
+  .actions { justify-content: flex-start; flex-wrap: nowrap; }
+  #profiles { min-width: 960px; }
+  .bulk-bar { flex-wrap: wrap; }
+  .row { flex-wrap: wrap; }
   th.hide-sm, td.hide-sm { display: none; }
   .search { width: 140px; }
 }
+/* Profile list preferences */
+.sort-wrap { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.sort-wrap select {
+  width: auto; min-width: 140px; padding: 8px 10px; font: inherit;
+  color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  color-scheme: dark;
+}
+.sort-wrap select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -42,9 +42,17 @@
         <span class="count" id="profile-count"></span>
         <div class="chips" id="filter-chips"></div>
       </div>
+      <label class="sort-wrap">Sort
+        <select id="sort-order" aria-label="Sort profiles">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name A–Z</option>
+          <option value="updated">Recently updated</option>
+        </select>
+      </label>
       <div class="search-wrap">
         <span class="search-ic">🔍</span>
-        <input id="search" class="search" type="text" placeholder="Search profiles…" />
+        <input id="search" aria-label="Search profiles" class="search" type="text" placeholder="Search profiles…" />
       </div>
     </div>
 

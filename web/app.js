@@ -9,7 +9,12 @@ async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || res.statusText);
+  if (!res.ok) {
+    const detail = Array.isArray(data.detail)
+      ? data.detail.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ")
+      : data.detail;
+    throw new Error(detail || res.statusText);
+  }
   return data;
 }
 
@@ -71,6 +76,15 @@ function proxyCell(p) {
 // selection + filter state (the "select area")
 const selected = new Set();
 let activeFilter = "all";
+let sortOrder = "newest";
+try {
+  const saved = JSON.parse(localStorage.getItem("manyfaces-view") || "{}");
+  if (["all", "running", "stopped", "error", "android", "chromium", "camoufox"].includes(saved.filter)) activeFilter = saved.filter;
+  if (["newest", "oldest", "name", "updated"].includes(saved.sort)) sortOrder = saved.sort;
+} catch (_) { /* local storage can be disabled */ }
+function saveView() {
+  try { localStorage.setItem("manyfaces-view", JSON.stringify({ filter: activeFilter, sort: sortOrder })); } catch (_) {}
+}
 
 const launchErrors = {};   // profile id -> last launch error message
 
@@ -127,14 +141,21 @@ function currentView() {
   return allProfiles.filter((p) => {
     const fp = p.fingerprint;
     if (activeFilter === "running" && !p.running) return false;
+    if (activeFilter === "stopped" && (p.status || "stopped") !== "stopped") return false;
+    if (activeFilter === "error" && p.status !== "error") return false;
     if (["android", "chromium", "camoufox"].includes(activeFilter) && p.engine !== activeFilter) return false;
     if (!q) return true;
-    return [p.name, fp.os, fp.device_name, fp.language, p.notes, ...(p.tags || [])]
+    return [p.name, fp.os, fp.device_name, fp.language, fp.timezone, p.proxy?.host, p.notes, ...(p.tags || [])]
       .join(" ").toLowerCase().includes(q);
+  }).sort((a, b) => {
+    if (sortOrder === "name") return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
+    const field = sortOrder === "updated" ? "updated_at" : "created_at";
+    const result = (a[field] || "").localeCompare(b[field] || "");
+    return (sortOrder === "oldest" ? result : -result) || a.id.localeCompare(b.id);
   });
 }
 
-function applySearch() { renderList(currentView()); }
+function applySearch() { saveView(); renderList(currentView()); }
 
 function renderStats() {
   const total = allProfiles.length;
@@ -146,10 +167,12 @@ function renderStats() {
     <div class="stat"><div class="stat-n on">${running}</div><div class="stat-l">Running</div></div>
     <div class="stat wide"><div class="stat-engines">${Object.entries(byEngine).map(([e, n]) => `${engineBadge(e)}&nbsp;${n}`).join(" &nbsp; ") || "—"}</div><div class="stat-l">By engine</div></div>`;
   const chips = [["all", "All", total], ["running", "● Running", running],
+    ["stopped", "Stopped", allProfiles.filter((p) => p.status === "stopped").length],
+    ["error", "⚠ Failed", allProfiles.filter((p) => p.status === "error").length],
     ["android", "🤖 Android", byEngine.android || 0], ["chromium", "🌐 Chromium", byEngine.chromium || 0],
     ["camoufox", "🦊 Camoufox", byEngine.camoufox || 0]];
   $("#filter-chips").innerHTML = chips
-    .filter((c) => c[0] === "all" || c[0] === "running" || c[2] > 0)
+    .filter((c) => ["all", "running", "stopped", "error", activeFilter].includes(c[0]) || c[2] > 0)
     .map(([k, label, n]) => `<button class="chip ${activeFilter === k ? "active" : ""}" data-filter="${k}">${label} <span>${n}</span></button>`).join("");
 }
 
@@ -161,6 +184,9 @@ function syncBulkBar() {
   const allSel = view.length > 0 && view.every((p) => selected.has(p.id));
   $("#head-check").checked = allSel;
   $("#bulk-master").checked = allSel;
+  const partial = !allSel && view.some((p) => selected.has(p.id));
+  $("#head-check").indeterminate = partial;
+  $("#bulk-master").indeterminate = partial;
 }
 
 function toggleSelectAll(on) {
@@ -168,9 +194,17 @@ function toggleSelectAll(on) {
   applySearch();
 }
 
+let profilesLoading = false;
+let lastProfilesJSON = "";
 async function loadProfiles() {
+  if (profilesLoading) return;
+  profilesLoading = true;
   try {
-    allProfiles = await api("/api/profiles");
+    const profiles = await api("/api/profiles");
+    const snapshot = JSON.stringify(profiles);
+    if (snapshot === lastProfilesJSON) return;
+    lastProfilesJSON = snapshot;
+    allProfiles = profiles;
     // Drop selections for profiles that no longer exist.
     const ids = new Set(allProfiles.map((p) => p.id));
     [...selected].forEach((id) => { if (!ids.has(id)) selected.delete(id); });
@@ -179,10 +213,13 @@ async function loadProfiles() {
     applySearch();
     if (allProfiles.some((p) => p.status === "launching")) ensurePolling();
   } catch (e) {
+    lastProfilesJSON = "";
     $("#profiles-body").innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message)}</td></tr>`;
-  }
+  } finally { profilesLoading = false; }
 }
 
+$("#sort-order").value = sortOrder;
+$("#sort-order").addEventListener("change", (e) => { sortOrder = e.target.value; applySearch(); });
 $("#search").addEventListener("input", applySearch);
 $("#head-check").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
 $("#bulk-master").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
@@ -261,6 +298,7 @@ $("#profiles-body").addEventListener("click", async (e) => {
     }
     loadProfiles();
   } catch (err) {
+    if (act === "start") { btn.disabled = false; btn.textContent = "Launch"; }
     // A real-Android launch fails until the SDK is installed — route to setup.
     if (act === "start" && /Android engine isn't installed/i.test(err.message)) {
       toast("Install the Android engine first", "err");
@@ -277,6 +315,7 @@ let pollTimer = null;
 function ensurePolling() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
+    if (document.hidden) return;
     await loadProfiles();
     const anyLaunching = allProfiles.some((p) => p.status === "launching");
     if (!anyLaunching) { clearInterval(pollTimer); pollTimer = null; }
@@ -323,8 +362,9 @@ $("#proxy-mode").addEventListener("click", (e) => {
 });
 
 function proxyToLine(p) {
-  const auth = p.username ? `${p.username}:${p.password}@` : "";
-  return `${p.type}://${auth}${p.host}:${p.port}`;
+  const auth = p.username ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password || "")}@` : "";
+  const host = p.host.includes(":") && !p.host.startsWith("[") ? `[${p.host}]` : p.host;
+  return `${p.type}://${auth}${host}:${p.port}`;
 }
 
 function readForm() {
@@ -952,4 +992,5 @@ document.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------- init ---
 loadProfiles();
 checkEngine();
-setInterval(loadProfiles, 5000);
+setInterval(() => { if (!document.hidden && !pollTimer) loadProfiles(); }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadProfiles(); });
