@@ -47,6 +47,16 @@ Those uses are illegal in many jurisdictions and are not supported.
 
 ## Features
 
+- **Dashboard organization** — sort by name, creation date, or last update;
+  filter stopped and failed profiles; search proxy hosts and timezones alongside
+  names, tags, and notes. Filter and sort choices are remembered on this browser.
+  Background tabs pause profile refreshes, overlapping requests are prevented,
+  and unchanged results preserve the existing table rows.
+- **Safer profile management** — live profiles must be stopped before changing
+  settings or fingerprints. Invalid input returns a validation error, imports
+  report invalid entries individually, and staged cookie files are replaced
+  atomically. Proxy lists support IPv6 and URL-encoded credentials.
+
 - **Three browser engines, per profile** — pick **Camoufox** (patched Firefox, the
   strongest native-level stealth), **Chromium** (Playwright Chromium), or **Android**
   (a real device) on each profile. Chromium is for sites that block Firefox, and it
@@ -292,6 +302,32 @@ Profile metadata lives in SQLite (`~/.antidetect/antidetect.db`); persistent bro
 data lives on disk per profile. The Android SDK, AVDs, and scrcpy live under
 `~/.antidetect/android/`.
 
+## Development checks
+
+Run the offline regression suite without downloading browser engines:
+
+```bash
+pip install fastapi "httpx[socks]" requests uvicorn
+python -m unittest discover -s tests -v
+node --check web/app.js
+```
+
+CI runs these checks on Windows and Linux with Python 3.12 and 3.14.
+To include the real Chromium dashboard test, install Playwright and its browser:
+
+```bash
+pip install playwright
+python -m playwright install chromium
+MANYFACES_BROWSER_TESTS=1 python -m unittest discover -s tests -v
+```
+
+In PowerShell, set `$env:MANYFACES_BROWSER_TESTS='1'` before running the unittest
+command. The browser test checks sorting, search, filter persistence, selection,
+launch error recovery, and responsive layout. Screenshots go to `.testdata/`.
+Tests use temporary profile data and make no external proxy requests or Android
+launches. Hardware-dependent engine launches and portable builds need separate
+manual verification.
+
 ## Roadmap toward parity with commercial tools
 
 - Authenticated / SOCKS proxy support for the real-Android engine (via a local
@@ -300,4 +336,4 @@ data lives on disk per profile. The Android SDK, AVDs, and scrcpy live under
 - Team features: multi-user, roles, shared/encrypted proxy pool.
 - Profile "warm-up" automation and cookie robot.
 - Fingerprint quality scoring against CreepJS/Pixelscan in-app.
-- Tag/folder organization, bulk actions, import/export of profiles.
+- Folder organization (tags, bulk actions, and profile import/export are available).
