@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
@@ -46,28 +47,28 @@ def parse_line(line: str, default_type: str = "http") -> Proxy | None:
         elif scheme.startswith("socks"):
             ptype = "socks5"
         else:
-            ptype = "http"
+            return None
 
     user = pw = ""
-    if "@" in rest:  # credentials before the host
-        cred, hostpart = rest.rsplit("@", 1)
-        user, _, pw = cred.partition(":")
-        host_port = hostpart.split(":")
-    else:
-        host_port = rest.split(":")
-        if len(host_port) >= 4:  # host:port:user:pass
-            user, pw = host_port[2], host_port[3]
-
-    if len(host_port) < 2 or not host_port[0]:
-        return None
+    # Legacy host:port:user:pass; preserve colons in passwords.
+    if "@" not in rest and not rest.startswith("["):
+        parts = rest.split(":", 3)
+        if len(parts) == 4:
+            rest = ":".join(parts[:2])
+            user, pw = parts[2:]
     try:
-        port = int(host_port[1])
+        parsed = urlsplit(f"{ptype}://{rest}")
+        host, port = parsed.hostname, parsed.port
+        if not host or not port or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            return None
+        if any(c.isspace() for c in host):
+            return None
+        if parsed.username is not None:
+            user = unquote(parsed.username)
+            pw = unquote(parsed.password or "")
+        return Proxy(type=ptype, host=host, port=port, username=user, password=pw)
     except ValueError:
         return None
-    if not (0 < port < 65536):
-        return None
-
-    return Proxy(type=ptype, host=host_port[0], port=port, username=user, password=pw)
 
 
 def parse_list(text: str, default_type: str = "http") -> list[Proxy]:
@@ -85,9 +86,9 @@ async def test(proxy: Proxy, timeout: float = _TIMEOUT) -> dict[str, Any]:
         return {"ok": False, "error": "Proxy host/port not set"}
 
     # Build an authenticated proxy URL for httpx.
-    scheme = "socks5" if proxy.type == "socks5" else "http"
-    auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
-    proxy_url = f"{scheme}://{auth}{proxy.host}:{proxy.port}"
+    scheme, address = proxy.server_url().split("://", 1)
+    auth = f"{quote(proxy.username, safe='')}:{quote(proxy.password, safe='')}@" if proxy.username else ""
+    proxy_url = f"{scheme}://{auth}{address}"
 
     start = time.perf_counter()
     try:

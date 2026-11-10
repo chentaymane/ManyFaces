@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .fingerprint import Fingerprint, generate as generate_fingerprint
 
@@ -17,12 +17,26 @@ ProxyMode = Literal["manual", "random", "rotate"]
 #   android   — real Android Emulator (AVD): a genuine Chrome-for-Android engine, not
 #               a spoof. Requires the one-click Android SDK install (see android.py).
 Engine = Literal["camoufox", "chromium", "android"]
+OperatingSystem = Literal["windows", "macos", "linux", "android", "ios"]
+
+
+class ProfileFields(BaseModel):
+    """Shared validation for profile creation, imports and partial updates."""
+
+    @field_validator("name", check_fields=False)
+    @classmethod
+    def validate_name(cls, value):
+        if value is None or not value.strip():
+            raise ValueError("Profile name must not be blank")
+        if len(value.strip()) > 200:
+            raise ValueError("Profile name must be at most 200 characters")
+        return value.strip()
 
 
 class Proxy(BaseModel):
     type: ProxyType = "http"
     host: str = ""
-    port: int = 0
+    port: int = Field(default=0, ge=0, le=65535)
     username: str = ""
     password: str = ""
 
@@ -32,8 +46,8 @@ class Proxy(BaseModel):
 
     def server_url(self) -> str:
         """Return a proxy URL as Camoufox/Playwright expects (`scheme://host:port`)."""
-        scheme = "socks5" if self.type == "socks5" else "http"
-        return f"{scheme}://{self.host}:{self.port}"
+        host = f"[{self.host}]" if ":" in self.host and not self.host.startswith("[") else self.host
+        return f"{self.type}://{host}:{self.port}"
 
     def playwright_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"server": self.server_url()}
@@ -90,7 +104,7 @@ class FingerprintModel(BaseModel):
         return cls(**fp.to_dict())
 
 
-class Profile(BaseModel):
+class Profile(ProfileFields):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     name: str
     notes: str = ""
@@ -102,7 +116,7 @@ class Profile(BaseModel):
     # at launch (random draw, or round-robin advancing `rotation_index`).
     proxy_mode: ProxyMode = "manual"
     proxy_pool: list[Proxy] = Field(default_factory=list)
-    rotation_index: int = 0
+    rotation_index: int = Field(default=0, ge=0)
     fingerprint: FingerprintModel = Field(default_factory=FingerprintModel)
     # Behavioural / hardening toggles handed to Camoufox.
     humanize: bool = True          # human-like cursor movement
@@ -131,7 +145,7 @@ class Profile(BaseModel):
         return self.proxy, None
 
 
-class ProfileCreate(BaseModel):
+class ProfileCreate(ProfileFields):
     name: str
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -140,7 +154,7 @@ class ProfileCreate(BaseModel):
     proxy: Optional[Proxy] = None
     proxy_mode: ProxyMode = "manual"
     proxy_pool: list[Proxy] = Field(default_factory=list)
-    os: Optional[str] = None            # constrain generated fingerprint to this OS
+    os: Optional[OperatingSystem] = None            # constrain generated fingerprint to this OS
     device: Optional[str] = None        # pin a specific phone model (see list_mobile_devices)
     fingerprint: Optional[FingerprintModel] = None  # or supply one fully
     humanize: bool = True
@@ -169,7 +183,14 @@ class ProfileCreate(BaseModel):
         )
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(ProfileFields):
+    @field_validator("*", mode="before")
+    @classmethod
+    def reject_null(cls, value):
+        if value is None:
+            raise ValueError("Profile fields cannot be null; omit unchanged fields")
+        return value
+
     name: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
@@ -178,7 +199,7 @@ class ProfileUpdate(BaseModel):
     proxy: Optional[Proxy] = None
     proxy_mode: Optional[ProxyMode] = None
     proxy_pool: Optional[list[Proxy]] = None
-    rotation_index: Optional[int] = None
+    rotation_index: Optional[int] = Field(default=None, ge=0)
     fingerprint: Optional[FingerprintModel] = None
     humanize: Optional[bool] = None
     block_webrtc: Optional[bool] = None

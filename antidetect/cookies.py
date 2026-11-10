@@ -8,8 +8,11 @@ browser layer; here we only validate/normalise and persist a staging file.
 from __future__ import annotations
 
 import json
+import math
+import os
 import random
 import string
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -31,7 +34,11 @@ def normalise(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Coerce a list of cookie dicts into Playwright's expected shape."""
     out: list[dict[str, Any]] = []
     for c in cookies:
-        if "name" not in c or "value" not in c:
+        if not isinstance(c, dict) or "name" not in c or "value" not in c:
+            continue
+        domain = c.get("domain", "")
+        path = c.get("path", "/")
+        if not isinstance(domain, str) or not domain or not isinstance(path, str) or not path.startswith("/"):
             continue
         cookie: dict[str, Any] = {
             "name": str(c["name"]),
@@ -40,11 +47,13 @@ def normalise(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "path": c.get("path", "/"),
             "httpOnly": bool(c.get("httpOnly", False)),
             "secure": bool(c.get("secure", True)),
-            "sameSite": c.get("sameSite", "Lax"),
+            "sameSite": c.get("sameSite") if c.get("sameSite") in ("Lax", "Strict", "None") else "Lax",
         }
         if "expires" in c and c["expires"] not in (None, "", -1):
             try:
-                cookie["expires"] = float(c["expires"])
+                expires = float(c["expires"])
+                if math.isfinite(expires) and expires >= 0:
+                    cookie["expires"] = expires
             except (TypeError, ValueError):
                 pass
         out.append(cookie)
@@ -56,16 +65,25 @@ def load(profile_id: str) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return normalise(data) if isinstance(data, list) else []
     except (json.JSONDecodeError, OSError):
         return []
 
 
 def save(profile_id: str, cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cookies = normalise(cookies)
-    _staging_path(profile_id).write_text(
-        json.dumps(cookies, indent=2), encoding="utf-8"
-    )
+    path = _staging_path(profile_id)
+    # Replace atomically: a concurrent browser launch must never see half a file.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as fh:
+            temporary = fh.name
+            json.dump(cookies, fh, indent=2, allow_nan=False)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
     return cookies
 
 

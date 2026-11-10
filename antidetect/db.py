@@ -6,8 +6,8 @@ disk per-profile under PROFILES_DIR, not in this DB.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -26,17 +26,21 @@ _SCHEMA = """
 """
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect():
     config.ensure_dirs()
     conn = sqlite3.connect(config.DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     # Wait instead of instantly failing with "database is locked" when two requests
     # (e.g. launching several profiles at once) write concurrently.
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    # Idempotent: guarantees the schema exists no matter how the app was started.
-    conn.execute(_SCHEMA)
-    return conn
+    try:
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(_SCHEMA)
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init() -> None:
@@ -74,15 +78,17 @@ def get(profile_id: str) -> Optional[Profile]:
 
 
 def update(profile_id: str, patch: ProfileUpdate) -> Optional[Profile]:
-    profile = get(profile_id)
-    if profile is None:
-        return None
-    data = profile.model_dump()
-    for key, value in patch.model_dump(exclude_unset=True).items():
-        data[key] = value
-    profile = Profile.model_validate(data)
-    profile.updated_at = _now()
     with _connect() as conn:
+        # Lock before reading: unrelated concurrent patches must not overwrite
+        # each other's changes, or resurrect a concurrently deleted profile.
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT data FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        if row is None:
+            return None
+        data = Profile.model_validate_json(row["data"]).model_dump()
+        data.update(patch.model_dump(exclude_unset=True))
+        profile = Profile.model_validate(data)
+        profile.updated_at = _now()
         conn.execute(
             "UPDATE profiles SET name = ?, data = ?, updated_at = ? WHERE id = ?",
             (profile.name, profile.model_dump_json(), profile.updated_at, profile_id),

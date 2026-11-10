@@ -73,6 +73,10 @@ def ensure_dirs() -> None:
 
 def profile_data_dir(profile_id: str) -> Path:
     """Return (and create) the persistent user-data directory for a profile."""
+    if not profile_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in profile_id):
+        raise ValueError("Invalid profile id")
     p = PROFILES_DIR / profile_id
+    if p.resolve().parent != PROFILES_DIR.resolve():
+        raise ValueError("Profile directory must stay inside the profiles folder")
     p.mkdir(parents=True, exist_ok=True)
     return p
