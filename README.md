@@ -124,6 +124,10 @@ Those uses are illegal in many jurisdictions and are not supported.
   - Values Camoufox's coherence checks would reject (for example a Mac with a touchscreen or a
     1.25 DPR, or Apple Silicon with 6 cores) are never generated. Profiles made by
     older versions are migrated automatically at launch.
+  - Screen size and DPR are drawn together from real displays (1920×1080 at 125%
+    reports 1536×864 @ 1.25, a MacBook Pro 14" 1512×982 @ 2), so `screen × DPR` is
+    always a panel that exists. Older impossible pairs (1920×1080 @ 1.25) get the
+    nearest real DPR at their next launch.
 - **Proxy management** — HTTP / HTTPS / SOCKS5 per profile, one-click live test
   (exit IP, geo, latency), and GeoIP locale/timezone-matching to the proxy's country.
 - **Proxy pool & rotation** — paste a list of proxies (any common format:
@@ -258,6 +262,14 @@ Playwright driver that launches it *is* bundled.
   pairs are now migrated to ones the engine accepts, and phone GPUs are applied
   after validation. Don't pin `camoufox==0.4.x` as a workaround: `requirements.txt`
   now targets 0.5.x.
+- **"Profile doesn't fit this display"** (formerly `ValueError: window.outerWidth …
+  at display scale … needs … pixels`): on Linux, Camoufox 0.5.9+ renders a window
+  at the profile's DPR, so a 1440×900 @ 2 Mac needs a 2880×1750 px window. ManyFaces
+  fits a desktop window into your workarea (taskbars and docks included) as long as
+  it stays a believable window for that screen; phones, and desktops that would have
+  to shrink below that, are refused rather than given a fake geometry. Launch them
+  in a virtual display (Linux, needs `Xvfb`), or create profiles with **Fit this
+  display** ticked, which only draws real displays whose panel fits your monitor.
 - **A launch shows "⚠ failed"**: click the pill for a short explanation. The full
   traceback is in `~/.antidetect/error.log`.
 - **`WebGLRenderingContext.getParameter(RENDERER)` shows your real GPU** while the
@@ -275,7 +287,8 @@ with launch("<profile-id>", headless=True) as ctx:
     page.screenshot(path="creep.png")
 ```
 
-Async version: `antidetect.automate.launch_async`.
+Async version: `antidetect.automate.launch_async`. `headless="virtual"` runs a headed
+browser on a private Xvfb display (Linux), for profiles too large for your monitor.
 
 ## Architecture
 

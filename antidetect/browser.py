@@ -12,10 +12,14 @@ We hand it: the profile's persistent user-data dir, its proxy, its OS/locale, an
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import sys
 import threading
 import traceback
 import warnings
-from typing import Any, Optional
+from contextlib import contextmanager
+from typing import Any, Iterator, Optional
 
 from . import config, cookies as cookie_store, fingerprint as fp_mod
 from .models import Profile
@@ -161,30 +165,230 @@ def _drop_unsupported(cfg: dict[str, Any], exe: str | None) -> None:
             cfg.pop(key, None)
 
 
-def _host_screen() -> tuple[int, int] | None:
-    """Usable size of the primary display, for sizing desktop windows to fit."""
+# ----------------------------------------------------------- display fit ----
+# Headful, the profile's window is a real window on the operator's monitor, and on
+# Linux Camoufox 0.5.9+ renders it at the profile's DPR (layout.css.devPixelsPerPx),
+# so a W x H CSS-px window covers W*dpr x H*dpr monitor pixels. The window size is
+# part of the fingerprint, so it may only be fitted to the host in ways a real user
+# of that device could produce; anything else is refused with DisplayFitError.
+
+_HOST_LINUX = sys.platform.startswith("linux")
+# Smallest window a fitted (restored, not maximised) desktop window may shrink to,
+# absolute and as a share of the profile's screen. Below that it reads as a bot.
+_MIN_FIT_WINDOW = (1024, 600)
+_MIN_FIT_SHARE = 0.6
+# Gap a fitted window keeps from the workarea edges, drawn per profile so that
+# outerWidth * dpr never equals the operator's workarea (a cross-profile watermark).
+_FIT_INSET_W = (32, 128)
+_FIT_INSET_H = (24, 80)
+
+
+class DisplayFitError(BrowserError, ValueError):
+    """The profile's window can't open on this display without changing its fingerprint."""
+
+    def __init__(self, profile_id: str, css_px: tuple[int, int], scale: float,
+                 available_px: tuple[int, int], mobile: bool) -> None:
+        self.profile_id = profile_id
+        self.css_px = css_px
+        self.scale = scale
+        self.required_px = (round(css_px[0] * scale), round(css_px[1] * scale))
+        self.available_px = available_px
+        self.mobile = mobile
+        super().__init__(
+            f"This profile needs {self.required_px[0]}×{self.required_px[1]} display pixels "
+            f"({css_px[0]}×{css_px[1]} CSS px at {scale:g}x), but this display's usable area is "
+            f"{available_px[0]}×{available_px[1]}. Shrinking the window further would break its "
+            f"fingerprint. Launch it in a virtual display, or use a profile that fits this display."
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": "display_fit",
+            "message": str(self),
+            "profile_id": self.profile_id,
+            "css_px": list(self.css_px),
+            "scale": self.scale,
+            "required_px": list(self.required_px),
+            "available_px": list(self.available_px),
+            "mobile": self.mobile,
+            "virtual_available": virtual_display_available(),
+        }
+
+
+def virtual_display_available() -> bool:
+    """Whether headless="virtual" (Camoufox on an Xvfb display) can run here."""
+    return _HOST_LINUX and shutil.which("Xvfb") is not None
+
+
+def _render_scale(fp) -> float:
+    """Monitor pixels per CSS px of the profile's window (Camoufox's `_physical_scale`).
+
+    Only Linux renders at the profile's DPR; on Windows and macOS the host's own
+    scaling is already in the (CSS px) display bounds, so it's 1 there.
+    """
+    return float(fp.device_pixel_ratio or 1) if _HOST_LINUX else 1.0
+
+
+def _x11_workarea() -> tuple[int, int] | None:
+    """Width/height of EWMH `_NET_WORKAREA`: the desktop minus docks and panels.
+
+    Read through libX11 directly (Firefox links it, so it's always there when a
+    browser can open); XWayland sessions publish it too. None when unavailable.
+    """
+    import ctypes
+    import ctypes.util
+
+    if not os.environ.get("DISPLAY"):
+        return None
+    name = ctypes.util.find_library("X11")
+    if not name:
+        return None
     try:
-        from screeninfo import get_monitors
+        x = ctypes.CDLL(name)
+    except OSError:
+        return None
+    ulong_p = ctypes.POINTER(ctypes.c_ulong)
+    x.XOpenDisplay.restype = ctypes.c_void_p
+    x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x.XDefaultRootWindow.restype = ctypes.c_ulong
+    x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    x.XInternAtom.restype = ctypes.c_ulong
+    x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    x.XGetWindowProperty.argtypes = [
+        ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long,
+        ctypes.c_int, ctypes.c_ulong, ulong_p, ctypes.POINTER(ctypes.c_int), ulong_p,
+        ulong_p, ctypes.POINTER(ulong_p),
+    ]
+    x.XFree.argtypes = [ctypes.c_void_p]
+    x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    dpy = x.XOpenDisplay(None)
+    if not dpy:
+        return None
+    try:
+        atom = x.XInternAtom(dpy, b"_NET_WORKAREA", True)
+        if not atom:
+            return None
+        rtype, fmt, count, after = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong()
+        data = ulong_p()
+        # Desktop 0's (x, y, w, h); every EWMH WM reports the same box per desktop.
+        status = x.XGetWindowProperty(
+            dpy, x.XDefaultRootWindow(dpy), atom, 0, 4, False, 6,  # 6 = XA_CARDINAL
+            ctypes.byref(rtype), ctypes.byref(fmt), ctypes.byref(count),
+            ctypes.byref(after), ctypes.byref(data),
+        )
+        if status != 0 or not data:
+            return None
+        try:
+            if fmt.value != 32 or count.value < 4:
+                return None
+            w, h = int(data[2]), int(data[3])
+        finally:
+            x.XFree(data)
+        return (w, h) if w > 0 and h > 0 else None
+    finally:
+        x.XCloseDisplay(dpy)
 
-        mons = get_monitors()
-        primary = next((m for m in mons if getattr(m, "is_primary", False)), mons[0] if mons else None)
-        if primary:
-            return int(primary.width), int(primary.height)
-    except Exception:  # noqa: BLE001 - headless box / no display / screeninfo missing
-        pass
-    return None
 
+def _host_workarea() -> tuple[int, int] | None:
+    """Usable display area for a headful window, in the units Camoufox bounds it by.
 
-def _desktop_window(fp) -> tuple[int, int]:
-    """Outer window size for a desktop profile: maximised on its spoofed screen,
-    but never larger than the real display (else the window hangs off-screen)."""
-    w = fp.screen_width
-    h = fp.screen_height - fp_mod._TASKBAR.get(fp.os, 0)
-    host = _host_screen()
-    if host:
-        w = min(w, host[0])
-        h = min(h, max(480, host[1] - 48))
+    The largest monitor (Camoufox's own bound: CSS px, which on Linux are monitor
+    pixels), narrowed by the window manager's workarea where one is published.
+    None when there is no display to open a window on.
+    """
+    try:
+        from camoufox.display import has_display, largest_display
+    except ImportError:
+        return None
+    if not has_display(os.environ):
+        return None
+    mon = largest_display()
+    if mon is None:
+        return None
+    w, h = mon.width, mon.height
+    # ponytail: workarea only from X11/XWayland _NET_WORKAREA; Windows/macOS fall
+    # back to full monitor bounds (their DPR scale is 1, so the HiDPI failure can't
+    # happen there). Add SPI_GETWORKAREA / NSScreen.visibleFrame if needed.
+    # A multi-monitor workarea spans every monitor, so cap it by the one we size for.
+    work = _x11_workarea() if _HOST_LINUX else None
+    if work:
+        w, h = min(w, work[0]), min(h, work[1])
     return w, h
+
+
+def host_display_limit() -> tuple[int, int] | None:
+    """Largest physical panel (css x DPR) whose profiles can open headful here.
+
+    Only Linux ties the window to the profile's DPR, so only there does the
+    profile's panel have to fit; elsewhere this is None (no constraint).
+    """
+    if not _HOST_LINUX:
+        return None
+    try:
+        from camoufox.display import has_display, largest_display
+    except ImportError:
+        return None
+    if not has_display(os.environ):
+        return None
+    mon = largest_display()
+    return (mon.width, mon.height) if mon else None
+
+
+@contextmanager
+def virtual_display(headless: Any) -> Iterator[str | None]:
+    """The X display a headless="virtual" launch runs on (an Xvfb started here and
+    killed on exit); None for every other mode. Pass it to camoufox_launch_options."""
+    if headless != "virtual":
+        yield None
+        return
+    from camoufox.virtdisplay import VirtualDisplay
+
+    display = VirtualDisplay()
+    try:
+        yield display.get()
+    finally:
+        display.kill()
+
+
+def _is_headful(headless: Any) -> bool:
+    """A real window on the operator's display (not headless, not Xvfb)."""
+    return headless is None or headless is False
+
+
+def window_size(profile: Profile, headless: Any = False) -> tuple[int, int]:
+    """Outer window size (CSS px) for the profile, fitted to the host if headful.
+
+    Headless and virtual-display launches never look at the host: the window is the
+    profile's own (maximised on its spoofed screen), identical on every machine.
+    Headful, that same window is used whenever it fits. If not:
+      - phones keep their exact screen-sized window (a phone in a shrunken desktop
+        window is an instant tell) -> DisplayFitError;
+      - desktops become a restored window within the workarea, inset by a
+        per-profile margin, if that is still a believable window for the screen;
+        otherwise DisplayFitError.
+    """
+    fp = profile.fingerprint.to_fingerprint()
+    w = fp.screen_width
+    h = fp.screen_height - (0 if fp.is_mobile else fp_mod._TASKBAR.get(fp.os, 0))
+    if not _is_headful(headless):
+        return w, h
+    avail = _host_workarea()
+    if not avail:
+        return w, h
+    scale = _render_scale(fp)
+    if w * scale <= avail[0] and h * scale <= avail[1]:
+        return w, h
+    if not fp.is_mobile:
+        import random
+
+        rng = random.Random(f"{profile.id}:window")
+        fw = min(w, int(avail[0] // scale) - rng.randint(*_FIT_INSET_W))
+        fh = min(h, int(avail[1] // scale) - rng.randint(*_FIT_INSET_H))
+        min_w = max(_MIN_FIT_WINDOW[0], _MIN_FIT_SHARE * fp.screen_width)
+        min_h = max(_MIN_FIT_WINDOW[1], _MIN_FIT_SHARE * fp.screen_height)
+        if fw >= min(min_w, w) and fh >= min(min_h, h):
+            return fw, fh
+    raise DisplayFitError(profile.id, (w, h), scale, avail, fp.is_mobile)
 
 
 def _mobile_base_os(fp) -> str:
@@ -212,12 +416,22 @@ def _mobile_base_gpu(fp, seed: str) -> tuple[str, str]:
     return fp_mod.resolve_webgl_pair(_mobile_base_os(fp), "", "", seed=seed)
 
 
-def build_launch_options(profile: Profile, headless: bool | None = None) -> dict[str, Any]:
+def build_launch_options(profile: Profile, headless: Any = None) -> dict[str, Any]:
     """Build the Camoufox launch arguments for a profile (`Camoufox(**opts)` form).
+
+    `headless` is False/None (a window on this display), True, or "virtual" (a
+    headed browser on an Xvfb display; built here as headless=False, the display
+    itself is supplied by `camoufox_launch_options`). Raises DisplayFitError when a
+    headful window can't fit this display without breaking the fingerprint.
 
     Prefer `camoufox_launch_options()`, which runs these through Camoufox and then
     applies the phone pins Camoufox's desktop-only validation can't accept.
     """
+    # Desktop window dimensions are deliberately NOT in `config`: Camoufox turns
+    # `window` into window.outer* (CamoufoxWindow.sys.mjs sizes the real window
+    # from them) and leaves inner* to the browser, so innerWidth, clientWidth,
+    # visualViewport and @media all measure the same real viewport.
+    window = window_size(profile, headless)
     fp = profile.fingerprint.to_fingerprint()
     geoip_active = profile.geoip and profile.proxy.is_set
     exe = _engine_exe()
@@ -234,7 +448,7 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
     _drop_unsupported(cfg, exe)
 
     opts: dict[str, Any] = {
-        "headless": False if headless is None else headless,
+        "headless": headless is True,
         "persistent_context": True,
         # Don't let Playwright enforce its own viewport: Juggler rejects its
         # `isMobile` field and a spoofed window size deadlocks it. We pin screen and
@@ -262,7 +476,7 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
         # Size the real window to the phone and expose ONLY the phone's fonts
         # (custom_fonts_only stops Camoufox merging the desktop font set, which
         # would otherwise leak a desktop identity).
-        opts["window"] = (fp.screen_width, fp.screen_height)
+        opts["window"] = window
         if fp.fonts:
             opts["fonts"] = fp.fonts
             opts["custom_fonts_only"] = True
@@ -279,6 +493,10 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
             # (bit 0x01), no hover.
             "ui.primaryPointerCapabilities": 1,
             "ui.allPointerCapabilities": 1,
+            # Render at the phone's own DPR. Camoufox snaps a 2.625 to the desktop
+            # value 2 for this pref, while mobile_overrides reports 2.625, so
+            # `(resolution)` and devicePixelRatio would disagree.
+            "layout.css.devPixelsPerPx": f"{float(fp.device_pixel_ratio):g}",
         }
     else:
         webgl = fp.webgl_config()
@@ -286,7 +504,7 @@ def build_launch_options(profile: Profile, headless: bool | None = None) -> dict
             # Camoufox 0.5+ aborts the launch on a pair its database doesn't hold;
             # normalize() has already migrated stored profiles, this is a backstop.
             opts["webgl_config"] = fp_mod.resolve_webgl_pair(fp.os, *webgl, seed=profile.id)
-        opts["window"] = _desktop_window(fp)
+        opts["window"] = window
     if profile.proxy.is_set:
         opts["proxy"] = profile.proxy.playwright_dict()
     return opts
@@ -331,20 +549,28 @@ def _apply_overrides(from_options: dict[str, Any], overrides: dict[str, Any]) ->
     from_options["env"] = env
 
 
-def camoufox_launch_options(profile: Profile, headless: bool | None = None) -> dict[str, Any]:
+def camoufox_launch_options(profile: Profile, headless: Any = None,
+                            virtual_display: str | None = None) -> dict[str, Any]:
     """Final Playwright launch options for a Camoufox profile.
 
     Runs our arguments through Camoufox's own `launch_options()` (fingerprint
     generation, validation, fonts, GeoIP, …), then writes the phone pins that its
     desktop-only checks would reject or "repair" back into the result. Pass the
     result to `Camoufox(from_options=…, persistent_context=True)`.
+
+    For headless="virtual", pass the running Xvfb's DISPLAY as `virtual_display`:
+    with `from_options`, Camoufox never points the browser at a display itself.
     """
     import inspect
 
     from camoufox.utils import launch_options
 
+    if headless == "virtual" and not virtual_display:
+        raise ValueError('headless="virtual" needs the virtual display it runs on')
     opts = build_launch_options(profile, headless=headless)
     opts.pop("persistent_context", None)
+    if virtual_display:
+        opts["virtual_display"] = virtual_display
     if "pin_cpu_cores" in inspect.signature(launch_options).parameters:
         opts["pin_cpu_cores"] = False  # what Camoufox's own launcher defaults to
     from_options = launch_options(**opts)
@@ -580,6 +806,8 @@ def friendly_error(exc: Exception) -> str:
         return "Chromium is not installed for Playwright. Run: python -m playwright install chromium"
     if name == "InvalidProxy" or ("proxy" in low and ("refused" in low or "connect" in low)):
         return f"The proxy didn't work: {msg.splitlines()[0] if msg else name}. Test it in the profile editor."
+    if isinstance(exc, DisplayFitError):
+        return msg
     if "user data directory is already in use" in low or "profile appears to be in use" in low:
         return "This profile's browser data is locked by another running browser. Close it and retry."
     first = msg.splitlines()[0] if msg else ""
@@ -589,8 +817,11 @@ def friendly_error(exc: Exception) -> str:
 
 
 class BrowserSession:
-    def __init__(self, profile: Profile) -> None:
+    def __init__(self, profile: Profile, headless: Any = False) -> None:
         self.profile = profile
+        # False: a window on this display. "virtual": headed on a private Xvfb
+        # display (Linux; Camoufox only). True: no window at all.
+        self.headless = headless
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._ready = threading.Event()
@@ -658,8 +889,10 @@ class BrowserSession:
             )
             self._ready.set()
             return
-        from_options = camoufox_launch_options(self.profile)
-        self._launch(Camoufox, from_options)
+        with virtual_display(self.headless) as display:
+            from_options = camoufox_launch_options(self.profile, headless=self.headless,
+                                                   virtual_display=display)
+            self._launch(Camoufox, from_options)
 
     def _run_chromium(self) -> None:
         try:
@@ -760,12 +993,12 @@ class SessionManager:
         self._sessions: dict[str, BrowserSession] = {}
         self._lock = threading.Lock()
 
-    def start(self, profile: Profile) -> None:
+    def start(self, profile: Profile, headless: Any = False) -> None:
         with self._lock:
             session = self._sessions.get(profile.id)
             if session and session.status in ("launching", "running"):
                 return  # already up or coming up — don't launch a second window
-            session = BrowserSession(profile)
+            session = BrowserSession(profile, headless=headless)
             self._sessions[profile.id] = session
             session.start()
 

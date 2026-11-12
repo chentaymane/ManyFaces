@@ -29,30 +29,57 @@ _WEBGL_FALLBACK = {
     "linux": [("Intel", "Intel(R) HD Graphics, or similar")],
 }
 
-# Common desktop resolutions (width, height) per OS. Macs get Mac panels (incl. the
-# Apple Silicon built-ins) rather than Windows-laptop sizes like 1366x768.
-_SCREENS = {
+# Real displays per OS as (css_width, css_height, device_pixel_ratio). screen.width
+# is in CSS px, so it and the DPR must be drawn TOGETHER: css * dpr is the physical
+# panel, and it has to be a panel that exists. Sampling them independently built
+# machines like 1920x1080 @ 1.25 (a 2400x1350 panel nobody sells). Duplicates weight
+# the draw. Macs get Mac panels (Retina built-ins, 5K, plain external monitors).
+_DISPLAYS = {
     "windows": [
-        (1920, 1080), (1920, 1080), (1536, 864), (1366, 768), (2560, 1440),
-        (1440, 900), (1600, 900), (1680, 1050), (1280, 720), (1920, 1200),
+        (1920, 1080, 1.0), (1920, 1080, 1.0), (1920, 1080, 1.0),
+        (1536, 864, 1.25), (1536, 864, 1.25),   # 1080p laptop at 125%
+        (1280, 720, 1.5),                       # 1080p laptop at 150%
+        (1366, 768, 1.0), (1600, 900, 1.0), (1440, 900, 1.0), (1680, 1050, 1.0),
+        (1920, 1200, 1.0), (2560, 1440, 1.0),
+        (2048, 1152, 1.25),                     # 1440p at 125%
+        (2560, 1440, 1.5), (1920, 1080, 2.0),   # 4K at 150% / 200%
     ],
     "macos": [
-        (1440, 900), (1512, 982), (1470, 956), (1728, 1117), (1920, 1080),
-        (2560, 1440), (1680, 1050), (1280, 832),
+        (1440, 900, 2.0), (1512, 982, 2.0), (1470, 956, 2.0), (1728, 1117, 2.0),
+        (1280, 832, 2.0), (2560, 1440, 2.0),    # Retina built-ins, 5K display
+        (1920, 1080, 1.0), (2560, 1440, 1.0),   # plain external monitors
     ],
     "linux": [
-        (1920, 1080), (1920, 1080), (2560, 1440), (1366, 768), (1600, 900),
-        (1680, 1050), (1920, 1200), (1440, 900),
+        (1920, 1080, 1.0), (1920, 1080, 1.0), (1920, 1080, 1.0),
+        (2560, 1440, 1.0), (1366, 768, 1.0), (1600, 900, 1.0), (1680, 1050, 1.0),
+        (1920, 1200, 1.0), (1440, 900, 1.0),
+        (1536, 864, 1.25), (1280, 720, 1.5),    # 1080p with fractional scaling
+        (2560, 1440, 1.5), (1920, 1080, 2.0),   # 4K at 150% / 200%
     ],
 }
 
-# Device-pixel ratios each desktop OS actually offers (mirrors Camoufox's
-# coherence rules, so a stored value is never "repaired" into something else).
-_DPR_BY_OS = {
-    "windows": [1.0, 1.0, 1.25, 1.5, 2.0],
-    "macos": [1.0, 2.0, 2.0],
-    "linux": [1.0, 1.0, 1.25, 1.5, 2.0],
-}
+# Device-pixel ratios each desktop OS offers, derived from the catalogue (mirrors
+# Camoufox's coherence rules, so a stored value is never "repaired" into another).
+_DPR_BY_OS = {os_name: sorted({d for _, _, d in rows}) for os_name, rows in _DISPLAYS.items()}
+
+
+def physical_size(width: int, height: int, dpr: float) -> tuple[int, int]:
+    """Panel pixels a CSS-px screen at `dpr` occupies."""
+    return round(width * dpr), round(height * dpr)
+
+
+def displays(os_name: str, max_physical_size: tuple[int, int] | None = None) -> list[tuple[int, int, float]]:
+    """The OS's display catalogue, optionally only panels within `max_physical_size`.
+
+    An empty filter result falls back to the whole catalogue: a fingerprint is
+    still needed, and the launch reports precisely why it can't open on this host.
+    """
+    rows = _DISPLAYS.get(os_name, _DISPLAYS["windows"])
+    if not max_physical_size:
+        return rows
+    mw, mh = max_physical_size
+    fit = [r for r in rows if physical_size(*r)[0] <= mw and physical_size(*r)[1] <= mh]
+    return fit or rows
 
 # Core counts an Apple Silicon Mac ships with.
 _APPLE_SILICON_CORES = [8, 8, 10, 10, 12, 16]
@@ -523,9 +550,16 @@ def normalize(fp: Fingerprint, seed: str | int = 0) -> Fingerprint:
             d["webgl_vendor"], d["webgl_renderer"] = resolve_webgl_pair(
                 fp.os, fp.webgl_vendor, fp.webgl_renderer, seed=seed
             )
-        allowed_dpr = sorted(set(_DPR_BY_OS.get(fp.os, _DPR_BY_OS["windows"])))
+        # A (screen, DPR) pair must be a real panel. Keep the screen (it's what
+        # layout and every page sees) and snap the DPR to one that exists for it;
+        # a screen outside the catalogue only gets the per-OS DPR set.
+        rows = _DISPLAYS.get(fp.os, _DISPLAYS["windows"])
+        allowed_dpr = sorted(
+            {r for w, h, r in rows if (w, h) == (fp.screen_width, fp.screen_height)}
+            or _DPR_BY_OS.get(fp.os, _DPR_BY_OS["windows"])
+        )
         if fp.device_pixel_ratio not in allowed_dpr:
-            d["device_pixel_ratio"] = min(allowed_dpr, key=lambda v: abs(v - fp.device_pixel_ratio))
+            d["device_pixel_ratio"] = min(allowed_dpr, key=lambda v: (abs(v - fp.device_pixel_ratio), v))
         if d["color_depth"] not in (24, 30):
             d["color_depth"] = 24
         if fp.os == "macos":
@@ -691,7 +725,10 @@ _RANDOM_OS_POOL = ["windows", "windows", "macos", "linux", "android", "android"]
 
 
 def generate(
-    os_name: str | None = None, seed: str | None = None, device: str | None = None
+    os_name: str | None = None,
+    seed: str | None = None,
+    device: str | None = None,
+    max_physical_size: tuple[int, int] | None = None,
 ) -> Fingerprint:
     """Generate a fresh, internally-coherent, deeply-randomized fingerprint.
 
@@ -699,6 +736,11 @@ def generate(
     Android — so bulk/random creation yields a natural mix of desktop and phone
     profiles. Pass `device` (a preset name from `list_mobile_devices()`) to pin a
     specific phone model; it overrides `os_name`.
+
+    `max_physical_size` keeps a desktop's real panel (css size x DPR) within the
+    given pixels, so it can open headful on that display. It only picks among
+    real displays; it never invents a resolution. Phones are fixed devices and
+    ignore it.
     """
     rng = random.Random(seed) if seed else random
     if device:
@@ -715,7 +757,7 @@ def generate(
         return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)
 
-    w, h = rng.choice(_SCREENS[os_name])
+    w, h, dpr = rng.choice(displays(os_name, max_physical_size))
     lang, region, tz = rng.choice(_LOCALES)
     cores = rng.choice(_CORES)
     vendor, renderer = _sample_webgl(os_name, rng, w, h, cores)
@@ -750,7 +792,7 @@ def generate(
         region=region,
         timezone=tz,
         color_depth=color_depth,
-        device_pixel_ratio=rng.choice(_DPR_BY_OS[os_name]),
+        device_pixel_ratio=dpr,
         max_touch_points=touch,
         do_not_track=rng.choice(_DNT),
         audio_sample_rate=rng.choice(_SAMPLE_RATES),

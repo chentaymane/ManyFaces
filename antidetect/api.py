@@ -8,7 +8,7 @@ import shutil
 import threading
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Literal, Optional, Union
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 
 from . import __version__, config, cookies as cookie_store, db, fingerprint as fp_gen, proxy as proxy_mod
 from . import android as android_engine
-from .browser import manager, BrowserError
+from . import browser as browser_mod
+from .browser import manager, BrowserError, DisplayFitError
 from .models import (
     FingerprintModel,
     Profile,
@@ -462,9 +463,24 @@ def list_profiles() -> list[dict[str, Any]]:
     return [_with_status(p) for p in db.list_all()]
 
 
+def _fit_limit(fit_display: bool) -> Optional[tuple[int, int]]:
+    """Physical panel bound for 'Fit this display' (None: off, or nothing to fit)."""
+    return browser_mod.host_display_limit() if fit_display else None
+
+
+@app.get("/api/display")
+def display_info() -> dict[str, Any]:
+    """What the dashboard needs to offer display-fit options for headful launches."""
+    limit = browser_mod.host_display_limit()
+    return {
+        "fit_limit": list(limit) if limit else None,
+        "virtual_available": browser_mod.virtual_display_available(),
+    }
+
+
 @app.post("/api/profiles", status_code=201)
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
-    profile = db.create(payload.build())
+    profile = db.create(payload.build(max_physical_size=_fit_limit(payload.fit_display)))
     return _with_status(profile)
 
 
@@ -520,14 +536,20 @@ def clone_profile(profile_id: str) -> dict[str, Any]:
 _launch_lock = threading.Lock()
 
 
+class StartRequest(BaseModel):
+    # False: a window on this display. "virtual": headed on a private Xvfb display
+    # (Linux, Camoufox). True: no window.
+    headless: Union[bool, Literal["virtual"]] = False
+
+
 @app.post("/api/profiles/{profile_id}/start")
-def start_profile(profile_id: str) -> dict[str, Any]:
+def start_profile(profile_id: str, req: Optional[StartRequest] = None) -> dict[str, Any]:
     # Serialize the status check, proxy selection and session registration.
     with _launch_lock:
-        return _start_profile(profile_id)
+        return _start_profile(profile_id, (req or StartRequest()).headless)
 
 
-def _start_profile(profile_id: str) -> dict[str, Any]:
+def _start_profile(profile_id: str, headless: Union[bool, str] = False) -> dict[str, Any]:
     profile = db.get(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -539,13 +561,29 @@ def _start_profile(profile_id: str) -> dict[str, Any]:
         # Migrate fingerprints made for an older engine (e.g. a GPU pair Camoufox
         # 0.5+ no longer accepts) before they can abort the launch.
         db.prepare_for_launch(profile)
+    if headless is not False:
+        if profile.engine != "camoufox":
+            raise HTTPException(400, "Headless and virtual-display launches are Camoufox-only")
+        if headless == "virtual" and not browser_mod.virtual_display_available():
+            raise HTTPException(400, "A virtual display needs Linux with Xvfb installed")
+    if profile.engine == "camoufox":
+        # Refuse a headful window that can't fit this display now, with the numbers
+        # the dashboard needs to offer alternatives, instead of failing in the
+        # background launch.
+        try:
+            browser_mod.window_size(profile, headless)
+        except DisplayFitError as exc:
+            raise HTTPException(409, exc.to_dict())
     # Resolve the effective proxy for this launch (random draw / rotate advance).
     eff_proxy, next_index = profile.select_proxy()
     profile.proxy = eff_proxy  # in-memory: what this session launches with
     try:
         # Non-blocking: returns immediately; the browser/device comes up in the
         # background. Only fast, definite failures (e.g. Android not installed) raise.
-        _engine_manager(profile).start(profile)
+        if profile.engine == "camoufox":
+            manager.start(profile, headless=headless)
+        else:
+            _engine_manager(profile).start(profile)
     except (BrowserError, RuntimeError) as exc:
         raise HTTPException(502, str(exc))
     if next_index is not None:
@@ -723,6 +761,7 @@ class BulkCreateRequest(BaseModel):
     os: OperatingSystem | None = None
     engine: Engine = "camoufox"
     seed_cookies: int = Field(default=15, ge=0, le=1000)
+    fit_display: bool = False
 
 
 @app.post("/api/profiles/bulk", status_code=201)
@@ -730,9 +769,10 @@ def bulk_create(req: BulkCreateRequest) -> dict[str, Any]:
     """Create N profiles, each with a fully-randomized fingerprint and cookie jar."""
     count = max(1, min(req.count, 200))
     created: list[dict[str, Any]] = []
+    limit = _fit_limit(req.fit_display)
     for i in range(count):
         payload = ProfileCreate(name=f"{req.name_prefix} {i + 1}", os=req.os, engine=req.engine)  # type: ignore[arg-type]
-        profile = db.create(payload.build())
+        profile = db.create(payload.build(max_physical_size=limit))
         if req.seed_cookies > 0:
             cookie_store.save(profile.id, cookie_store.generate_random(count=req.seed_cookies))
         created.append(_with_status(profile))

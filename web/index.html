@@ -126,6 +126,7 @@
           </div>
         </div>
         <div class="field hint" id="engine-hint" style="margin-top:-4px"></div>
+        <label class="check hidden-block" id="f-fit-row"><input type="checkbox" id="f-fit" checked /> Fit this display <span class="hint">— desktop screens that can open in a window on this monitor</span></label>
         <div class="row">
           <div class="field">
             <label>Tags <span class="hint">— comma-separated, searchable</span></label>
@@ -270,10 +271,30 @@
             <option value="chromium">🌐 Chromium — compatibility + real phone UI</option>
           </select>
         </div>
+        <label class="check hidden-block" id="bulk-fit-row"><input type="checkbox" id="bulk-fit" checked /> Fit this display <span class="hint">— desktop screens that can open in a window on this monitor</span></label>
       </div>
       <div class="modal-foot">
         <button id="bulk-cancel" class="ghost">Cancel</button>
         <button id="bulk-create" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------- Display fit modal --- -->
+  <div id="fit-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="fit-title">
+    <div class="modal-card sm">
+      <div class="modal-head">
+        <h2 id="fit-title">Profile doesn't fit this display</h2>
+        <button id="fit-close" class="icon" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="fit-msg" style="margin-top:0"></p>
+        <p class="field hint" id="fit-hint"></p>
+      </div>
+      <div class="modal-foot">
+        <button id="fit-cancel" class="ghost">Cancel</button>
+        <button id="fit-new" class="ghost">New profile that fits</button>
+        <button id="fit-virtual" class="primary">Launch in virtual display</button>
       </div>
     </div>
   </div>

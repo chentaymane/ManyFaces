@@ -205,7 +205,7 @@ class SessionTests(unittest.TestCase):
         class FakeSession:
             status = "stopped"
 
-            def __init__(self, profile):
+            def __init__(self, profile, headless=False):
                 instances.append(self)
 
             def start(self):

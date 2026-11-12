@@ -10,10 +10,13 @@ async function api(path, opts = {}) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail = Array.isArray(data.detail)
-      ? data.detail.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ")
-      : data.detail;
-    throw new Error(detail || res.statusText);
+    const d = data.detail;
+    const detail = Array.isArray(d)
+      ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ")
+      : (d && typeof d === "object" ? d.message : d);
+    const err = new Error(detail || res.statusText);
+    if (d && typeof d === "object" && !Array.isArray(d)) err.detail = d;  // structured errors (e.g. display_fit)
+    throw err;
   }
   return data;
 }
@@ -87,6 +90,18 @@ function saveView() {
 }
 
 const launchErrors = {};   // profile id -> last launch error message
+
+// Host display facts for headful launches: fit_limit is the largest physical panel
+// a profile may have to open in a window here (null when it doesn't matter).
+let displayInfo = { fit_limit: null, virtual_available: false };
+api("/api/display").then((d) => { displayInfo = d; syncFitRows(); }).catch(() => {});
+
+const isPhoneOs = (os) => os === "android" || os === "ios";
+function syncFitRows() {
+  const can = !!displayInfo.fit_limit;
+  $("#f-fit-row").classList.toggle("hidden-block", !can || !!editingId || isPhoneOs($("#f-os").value));
+  $("#bulk-fit-row").classList.toggle("hidden-block", !can || isPhoneOs($("#bulk-os").value));
+}
 
 function statusPill(p) {
   const st = p.status || (p.running ? "running" : "stopped");
@@ -303,11 +318,53 @@ $("#profiles-body").addEventListener("click", async (e) => {
     if (act === "start" && /Android engine isn't installed/i.test(err.message)) {
       toast("Install the Android engine first", "err");
       openAndroid();
+    } else if (act === "start" && err.detail && err.detail.code === "display_fit") {
+      openFit(id, err.detail);
     } else {
       toast(err.message, "err");
     }
     loadProfiles();
   }
+});
+
+// -------------------------------------------------------- display fit dialog ---
+// A headful launch the server refused because the profile's window can't open on
+// this monitor without changing its fingerprint. Offer the honest ways out.
+let fitProfileId = null;
+function openFit(id, d) {
+  fitProfileId = id;
+  const [w, h] = d.css_px, [rw, rh] = d.required_px, [aw, ah] = d.available_px;
+  $("#fit-msg").textContent =
+    `This profile needs ${rw}×${rh} display pixels (${w}×${h} CSS px at ${d.scale}x), ` +
+    `but this display's usable area is ${aw}×${ah}. Shrinking its window further would break its fingerprint.`;
+  $("#fit-hint").textContent = (d.mobile
+    ? "A phone profile always opens at its exact screen size. The Chromium engine shows phones in a scaled window. "
+    : "") + (d.virtual_available
+    ? "A virtual display runs the browser on an invisible screen: good for automation, not for clicking around yourself."
+    : "Virtual displays need Linux with Xvfb installed.");
+  $("#fit-virtual").classList.toggle("hidden-block", !d.virtual_available);
+  $("#fit-new").classList.toggle("hidden-block", !!d.mobile || !displayInfo.fit_limit);
+  $("#fit-modal").classList.remove("hidden");
+}
+const closeFit = () => $("#fit-modal").classList.add("hidden");
+$("#fit-close").addEventListener("click", closeFit);
+$("#fit-cancel").addEventListener("click", closeFit);
+$("#fit-virtual").addEventListener("click", async () => {
+  const id = fitProfileId; closeFit();
+  try {
+    await api(`/api/profiles/${id}/start`, { method: "POST", body: JSON.stringify({ headless: "virtual" }) });
+    toast("Launching in a virtual display…");
+    ensurePolling();
+  } catch (err) { toast(err.message, "err"); }
+  loadProfiles();
+});
+$("#fit-new").addEventListener("click", async () => {
+  const src = allProfiles.find((p) => p.id === fitProfileId);
+  closeFit();
+  await openEditor(null);
+  if (src && !isPhoneOs(src.fingerprint.os)) $("#f-os").value = src.fingerprint.os;
+  $("#f-fit").checked = true;
+  syncFitRows();
 });
 
 // Live status: while any profile is launching, refresh so pills update on their own.
@@ -343,6 +400,8 @@ function updateEngineHint() {
   $("#engine-hint").textContent = hints[engine] || hints.camoufox;
 }
 $("#f-engine").addEventListener("change", updateEngineHint);
+$("#f-os").addEventListener("change", syncFitRows);
+$("#bulk-os").addEventListener("change", syncFitRows);
 
 function setProxyMode(mode) {
   proxyMode = mode;
@@ -437,6 +496,7 @@ async function openEditor(id) {
   let profile = null;
   if (id) profile = await api(`/api/profiles/${id}`);
   fillForm(profile);
+  syncFitRows();
   $("#modal").classList.remove("hidden");
 }
 function closeEditor() { $("#modal").classList.add("hidden"); }
@@ -471,7 +531,8 @@ $("#modal-save").addEventListener("click", async () => {
       await api(`/api/profiles/${editingId}`, { method: "PATCH", body: JSON.stringify(common) });
       toast("Saved");
     } else {
-      await api("/api/profiles", { method: "POST", body: JSON.stringify({ ...common, os: form.os }) });
+      const fit = !$("#f-fit-row").classList.contains("hidden-block") && $("#f-fit").checked;
+      await api("/api/profiles", { method: "POST", body: JSON.stringify({ ...common, os: form.os, fit_display: fit }) });
       toast("Profile created");
     }
     closeEditor();
@@ -616,7 +677,7 @@ $("#pool-list").addEventListener("click", (e) => {
 });
 
 // -------------------------------------------------------------- bulk create ---
-$("#bulk-btn").addEventListener("click", () => $("#bulk-modal").classList.remove("hidden"));
+$("#bulk-btn").addEventListener("click", () => { syncFitRows(); $("#bulk-modal").classList.remove("hidden"); });
 $("#bulk-close").addEventListener("click", () => $("#bulk-modal").classList.add("hidden"));
 $("#bulk-cancel").addEventListener("click", () => $("#bulk-modal").classList.add("hidden"));
 
@@ -629,6 +690,7 @@ $("#bulk-create").addEventListener("click", async () => {
     os: $("#bulk-os").value || null,
     engine: $("#bulk-engine").value || "camoufox",
     seed_cookies: parseInt($("#bulk-cookies").value || "0", 10),
+    fit_display: !$("#bulk-fit-row").classList.contains("hidden-block") && $("#bulk-fit").checked,
   };
   try {
     $("#bulk-create").textContent = "Creating…"; $("#bulk-create").disabled = true;
