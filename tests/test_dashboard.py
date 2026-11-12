@@ -42,6 +42,7 @@ class DashboardTests(IsolatedData):
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.route("**/api/engine/status", lambda route: route.fulfill(json={"installed": True}))
+                page.route("**/api/display", lambda route: route.fulfill(json={"fit_limit": [800, 600], "virtual_available": True}))
                 page.goto(f"http://127.0.0.1:{port}/")
                 page.wait_for_function("document.querySelectorAll('.row-check').length === 3")
                 page.select_option("#sort-order", "name")
@@ -72,6 +73,19 @@ class DashboardTests(IsolatedData):
                 page.wait_for_function("document.querySelector('#toast').textContent === 'Test launch failed'")
                 self.assertTrue(launch.is_enabled())
                 self.assertEqual(launch.inner_text(), "Launch")
+                fit_error = {"code": "display_fit", "css_px": [1920, 1032], "required_px": [2400, 1290],
+                             "available_px": [800, 600], "scale": 1.25, "mobile": False, "virtual_available": True}
+                page.route("**/api/profiles/*/start", lambda route: route.fulfill(status=409, json={"detail": fit_error}))
+                launch.click()
+                fit_dialog = page.get_by_role("dialog", name="Profile doesn't fit this display")
+                fit_dialog.wait_for()
+                self.assertIn("800×600", fit_dialog.inner_text())
+                page.get_by_role("button", name="New profile that fits").click()
+                self.assertTrue(page.locator("#f-fit").is_visible())
+                self.assertTrue(page.locator("#f-fit").is_checked())
+                page.select_option("#f-engine", "chromium")
+                self.assertFalse(page.locator("#f-fit").is_visible())
+                page.keyboard.press("Escape")
                 more = page.locator('summary[aria-label="More actions for Alpha"]')
                 more.click()
                 self.assertTrue(page.get_by_role("button", name="Manage cookies").is_visible())

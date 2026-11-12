@@ -60,7 +60,7 @@ class DatabaseTests(IsolatedData):
 class ApiTests(IsolatedData):
     def setUp(self):
         super().setUp()
-        self.client = TestClient(api.app)
+        self.client = TestClient(api.app, base_url="http://127.0.0.1")
         self.addCleanup(self.client.close)
 
     def test_invalid_input_is_422_without_partial_profiles(self):
@@ -144,7 +144,7 @@ class ApiTests(IsolatedData):
 
     def test_lifespan_stops_both_managers(self):
         with patch.object(api.manager, "stop_all") as desktop, patch.object(api.android_engine.manager, "stop_all") as android:
-            with TestClient(api.app):
+            with TestClient(api.app, base_url="http://127.0.0.1"):
                 pass
         desktop.assert_called_once()
         android.assert_called_once()
@@ -205,7 +205,7 @@ class SessionTests(unittest.TestCase):
         class FakeSession:
             status = "stopped"
 
-            def __init__(self, profile):
+            def __init__(self, profile, headless=False):
                 instances.append(self)
 
             def start(self):

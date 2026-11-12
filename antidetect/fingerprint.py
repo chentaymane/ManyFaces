@@ -8,6 +8,7 @@ looks like the same real machine every session.
 """
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field, asdict
 from typing import Any
@@ -29,30 +30,86 @@ _WEBGL_FALLBACK = {
     "linux": [("Intel", "Intel(R) HD Graphics, or similar")],
 }
 
-# Common desktop resolutions (width, height) per OS. Macs get Mac panels (incl. the
-# Apple Silicon built-ins) rather than Windows-laptop sizes like 1366x768.
-_SCREENS = {
+# Real displays per OS as (css_width, css_height, device_pixel_ratio). screen.width
+# is in CSS px, so it and the DPR must be drawn TOGETHER: css * dpr is the physical
+# panel, and it has to be a panel that exists. Sampling them independently built
+# machines like 1920x1080 @ 1.25 (a 2400x1350 panel nobody sells). Duplicates weight
+# the draw. Macs get Mac panels (Retina built-ins, 5K, plain external monitors).
+_DISPLAYS = {
     "windows": [
-        (1920, 1080), (1920, 1080), (1536, 864), (1366, 768), (2560, 1440),
-        (1440, 900), (1600, 900), (1680, 1050), (1280, 720), (1920, 1200),
+        (1920, 1080, 1.0), (1920, 1080, 1.0), (1920, 1080, 1.0),
+        (1536, 864, 1.25), (1536, 864, 1.25),   # 1080p laptop at 125%
+        (1280, 720, 1.5),                       # 1080p laptop at 150%
+        (1366, 768, 1.0), (1600, 900, 1.0), (1440, 900, 1.0), (1680, 1050, 1.0),
+        (1920, 1200, 1.0), (2560, 1440, 1.0),
+        (2048, 1152, 1.25),                     # 1440p at 125%
+        (2560, 1440, 1.5), (1920, 1080, 2.0),   # 4K at 150% / 200%
     ],
     "macos": [
-        (1440, 900), (1512, 982), (1470, 956), (1728, 1117), (1920, 1080),
-        (2560, 1440), (1680, 1050), (1280, 832),
+        (1440, 900, 2.0), (1512, 982, 2.0), (1470, 956, 2.0), (1728, 1117, 2.0),
+        (1280, 832, 2.0), (2560, 1440, 2.0),    # Retina built-ins, 5K display
+        (1920, 1080, 1.0), (2560, 1440, 1.0),   # plain external monitors
     ],
     "linux": [
-        (1920, 1080), (1920, 1080), (2560, 1440), (1366, 768), (1600, 900),
-        (1680, 1050), (1920, 1200), (1440, 900),
+        (1920, 1080, 1.0), (1920, 1080, 1.0), (1920, 1080, 1.0),
+        (2560, 1440, 1.0), (1366, 768, 1.0), (1600, 900, 1.0), (1680, 1050, 1.0),
+        (1920, 1200, 1.0), (1440, 900, 1.0),
+        (1536, 864, 1.25), (1280, 720, 1.5),    # 1080p with fractional scaling
+        (2560, 1440, 1.5), (1920, 1080, 2.0),   # 4K at 150% / 200%
     ],
 }
 
-# Device-pixel ratios each desktop OS actually offers (mirrors Camoufox's
-# coherence rules, so a stored value is never "repaired" into something else).
-_DPR_BY_OS = {
-    "windows": [1.0, 1.0, 1.25, 1.5, 2.0],
-    "macos": [1.0, 2.0, 2.0],
-    "linux": [1.0, 1.0, 1.25, 1.5, 2.0],
-}
+# Device-pixel ratios each desktop OS offers, derived from the catalogue (mirrors
+# Camoufox's coherence rules, so a stored value is never "repaired" into another).
+_DPR_BY_OS = {os_name: sorted({d for _, _, d in rows}) for os_name, rows in _DISPLAYS.items()}
+
+
+def physical_size(width: int, height: int, dpr: float) -> tuple[int, int]:
+    """Panel pixels a CSS-px screen at `dpr` occupies."""
+    return round(width * dpr), round(height * dpr)
+
+
+# Smallest window a fitted (restored, not maximised) desktop window may shrink to,
+# absolute and as a share of the profile's screen. Below that it reads as a bot.
+_MIN_FIT_WINDOW = (1024, 600)
+_MIN_FIT_SHARE = 0.6
+
+
+def min_window(os_name: str, width: int, height: int) -> tuple[int, int]:
+    """Smallest believable desktop window (CSS px) for a `width` x `height` screen.
+
+    The browser never shrinks a headful window below this to fit a display.
+    """
+    full_h = height - _TASKBAR.get(os_name, 0)
+    return (min(width, math.ceil(max(_MIN_FIT_WINDOW[0], _MIN_FIT_SHARE * width))),
+            min(full_h, math.ceil(max(_MIN_FIT_WINDOW[1], _MIN_FIT_SHARE * height))))
+
+
+def opens_in(os_name: str, width: int, height: int, dpr: float, area: tuple[int, int]) -> bool:
+    """Whether a desktop with this screen can open headful in `area` monitor pixels
+    (Linux renders at the profile's DPR), at most shrunk to its `min_window`."""
+    mw, mh = min_window(os_name, width, height)
+    return math.ceil(mw * dpr) <= area[0] and math.ceil(mh * dpr) <= area[1]
+
+
+def displays(os_name: str, max_physical_size: tuple[int, int] | None = None) -> list[tuple[int, int, float]]:
+    """The OS's display catalogue, optionally only those that can open headful in a
+    `max_physical_size` workarea (monitor pixels; see `opens_in`).
+
+    An empty list means this work area cannot fit any preset for the OS.
+    """
+    rows = _DISPLAYS.get(os_name, _DISPLAYS["windows"])
+    if not max_physical_size:
+        return rows
+    return [r for r in rows if opens_in(os_name, *r, max_physical_size)]
+
+
+class DisplayPresetError(ValueError):
+    """The requested profile cannot be created with the display fit constraint."""
+
+    def __init__(self, area: tuple[int, int]) -> None:
+        super().__init__(f"No matching profile fits the {area[0]} × {area[1]} display work area. "
+                         "Choose another operating system or turn off Fit this display.")
 
 # Core counts an Apple Silicon Mac ships with.
 _APPLE_SILICON_CORES = [8, 8, 10, 10, 12, 16]
@@ -523,9 +580,11 @@ def normalize(fp: Fingerprint, seed: str | int = 0) -> Fingerprint:
             d["webgl_vendor"], d["webgl_renderer"] = resolve_webgl_pair(
                 fp.os, fp.webgl_vendor, fp.webgl_renderer, seed=seed
             )
-        allowed_dpr = sorted(set(_DPR_BY_OS.get(fp.os, _DPR_BY_OS["windows"])))
+        # The catalogue guides new profiles. Preserve supported DPR values on
+        # saved profiles even if that screen/DPR pair is no longer generated.
+        allowed_dpr = _DPR_BY_OS.get(fp.os, _DPR_BY_OS["windows"])
         if fp.device_pixel_ratio not in allowed_dpr:
-            d["device_pixel_ratio"] = min(allowed_dpr, key=lambda v: abs(v - fp.device_pixel_ratio))
+            d["device_pixel_ratio"] = min(allowed_dpr, key=lambda v: (abs(v - fp.device_pixel_ratio), v))
         if d["color_depth"] not in (24, 30):
             d["color_depth"] = 24
         if fp.os == "macos":
@@ -691,7 +750,10 @@ _RANDOM_OS_POOL = ["windows", "windows", "macos", "linux", "android", "android"]
 
 
 def generate(
-    os_name: str | None = None, seed: str | None = None, device: str | None = None
+    os_name: str | None = None,
+    seed: str | None = None,
+    device: str | None = None,
+    max_physical_size: tuple[int, int] | None = None,
 ) -> Fingerprint:
     """Generate a fresh, internally-coherent, deeply-randomized fingerprint.
 
@@ -699,6 +761,11 @@ def generate(
     Android — so bulk/random creation yields a natural mix of desktop and phone
     profiles. Pass `device` (a preset name from `list_mobile_devices()`) to pin a
     specific phone model; it overrides `os_name`.
+
+    `max_physical_size` (a workarea, in monitor pixels) keeps a desktop to real
+    displays that can open headful there (`opens_in`); it never invents a
+    resolution. A random OS draw under a limit uses desktop OSes with fitting
+    presets. Explicit phone presets retain their fixed geometry.
     """
     rng = random.Random(seed) if seed else random
     if device:
@@ -708,14 +775,22 @@ def generate(
             return _generate_ios(rng, tup) if kind == "ios" else _generate_android(rng, tup)
         # Unknown device name: fall back to os-based generation below.
     if os_name is None:
-        os_name = rng.choice(_RANDOM_OS_POOL)
+        pool = _RANDOM_OS_POOL
+        if max_physical_size:
+            pool = [o for o in pool if o not in _MOBILE_OS and displays(o, max_physical_size)]
+            if not pool:
+                raise DisplayPresetError(max_physical_size)
+        os_name = rng.choice(pool)
     if os_name == "ios":
         return _generate_ios(rng)
     if os_name in _MOBILE_OS:
         return _generate_android(rng)
     os_name = os_name if os_name in _OS_SHORT else rng.choice(_OS_CHOICES)
 
-    w, h = rng.choice(_SCREENS[os_name])
+    available = displays(os_name, max_physical_size)
+    if max_physical_size and not available:
+        raise DisplayPresetError(max_physical_size)
+    w, h, dpr = rng.choice(available)
     lang, region, tz = rng.choice(_LOCALES)
     cores = rng.choice(_CORES)
     vendor, renderer = _sample_webgl(os_name, rng, w, h, cores)
@@ -750,7 +825,7 @@ def generate(
         region=region,
         timezone=tz,
         color_depth=color_depth,
-        device_pixel_ratio=rng.choice(_DPR_BY_OS[os_name]),
+        device_pixel_ratio=dpr,
         max_touch_points=touch,
         do_not_track=rng.choice(_DNT),
         audio_sample_rate=rng.choice(_SAMPLE_RATES),

@@ -46,7 +46,8 @@ Choose an engine when creating or editing a profile.
 | Chromium | Chromium compatibility and emulated phone profiles | Run `python -m playwright install chromium`. |
 | Android | Chrome inside an Android emulator | Select **New phone → Android emulator → Create & boot** and follow the setup prompt. |
 
-Camoufox uses the 0.5.x package specified in [requirements.txt](requirements.txt).
+Camoufox requires 0.5.9 or newer in the 0.5.x series, as specified in
+[requirements.txt](requirements.txt).
 The dashboard works before an engine is installed.
 
 Android setup downloads the SDK, a system image, and the scrcpy mirror.
@@ -98,6 +99,16 @@ the executable. The bundled Camoufox binary is specific to the build platform.
 
 - Select **Failed** on a profile to see its launch error. More detail is
   available in `~/.antidetect/error.log`.
+- On Linux, Camoufox renders the window at the profile's display scale. If
+  it exceeds the work area, ManyFaces can reduce a desktop window within its
+  supported size range. Phone windows keep their preset dimensions. Use
+  **Fit this display** when creating a Camoufox desktop profile to select a
+  compatible preset. If none fits, choose another OS or turn off the option.
+- For a profile that needs a larger display, use Chromium for interactive
+  phone emulation or Camoufox's **Launch in virtual display** for automation.
+  Virtual display mode needs Xvfb and `setpriv` on Linux. Camoufox's Xvfb
+  uses software rendering and disables X11 access control. Use it on a
+  machine without untrusted local users.
 - If Chromium is missing, run `python -m playwright install chromium` in the
   same Python environment that runs ManyFaces.
 - Stop a running profile before editing or randomizing it.
@@ -127,6 +138,7 @@ To regenerate the dashboard logo and Windows icon, install Pillow and run
 
 Use a saved Camoufox profile from Python. See
 [antidetect/automate.py](antidetect/automate.py) for the async entry point.
+Use `headless="virtual"` to run on an Xvfb display on Linux.
 
 ```python
 from antidetect.automate import launch

@@ -78,7 +78,7 @@ class FingerprintModel(BaseModel):
     timezone: str = "America/New_York"
     # deep randomization vectors (defaults keep older stored profiles valid)
     color_depth: int = 24
-    device_pixel_ratio: float = 1.0
+    device_pixel_ratio: float = Field(1.0, gt=0, le=4)
     max_touch_points: int = 0
     do_not_track: str = "unspecified"
     audio_sample_rate: int = 48000
@@ -160,12 +160,16 @@ class ProfileCreate(ProfileFields):
     humanize: bool = True
     block_webrtc: bool = True
     geoip: bool = True
+    # Only draw desktop displays whose physical panel fits this host's monitor, so
+    # the profile can open headful here (see fingerprint.generate).
+    fit_display: bool = False
 
-    def build(self) -> Profile:
+    def build(self, max_physical_size: Optional[tuple[int, int]] = None) -> Profile:
         fp = (
             self.fingerprint.to_fingerprint()
             if self.fingerprint
-            else generate_fingerprint(os_name=self.os, device=self.device)
+            else generate_fingerprint(os_name=self.os, device=self.device,
+                                      max_physical_size=max_physical_size)
         )
         return Profile(
             name=self.name,

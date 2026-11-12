@@ -97,13 +97,14 @@ def update(profile_id: str, patch: ProfileUpdate) -> Optional[Profile]:
     return profile
 
 
-def prepare_for_launch(profile: Profile) -> Profile:
+def prepare_for_launch(profile: Profile, *, persist: bool = True) -> Profile:
     """Migrate a stored fingerprint to what the installed engine accepts, in place.
 
     Profiles created against an older Camoufox can hold values the current one
     rejects (a GPU pair no longer in its database aborts the launch) or would
     silently rewrite. `fingerprint.normalize` fixes them deterministically; the
-    result is persisted so the dashboard shows exactly what pages will see.
+    result is normally persisted so the dashboard shows what pages will see.
+    Pass persist=False when a launch still needs to pass validation.
     """
     from .fingerprint import normalize
     from .models import FingerprintModel
@@ -112,7 +113,7 @@ def prepare_for_launch(profile: Profile) -> Profile:
     fixed = normalize(fp, seed=profile.id)
     if fixed != fp:
         profile.fingerprint = FingerprintModel.from_fingerprint(fixed)
-        if get(profile.id):
+        if persist:
             update(profile.id, ProfileUpdate(fingerprint=profile.fingerprint))
     return profile
 
