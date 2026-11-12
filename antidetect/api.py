@@ -13,6 +13,7 @@ from typing import Any, Literal, Optional, Union
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
 from . import __version__, config, cookies as cookie_store, db, fingerprint as fp_gen, proxy as proxy_mod
@@ -46,6 +47,14 @@ async def lifespan(app):
 
 
 app = FastAPI(title="ManyFaces", version=__version__, lifespan=lifespan)
+# Refuse other Host headers: a page open in a managed browser could otherwise
+# DNS-rebind a name onto 127.0.0.1 and read this API (e.g. the host's display
+# geometry). Bound to every interface on purpose, the operator chose exposure.
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"] if config.HOST in ("0.0.0.0", "::", "")
+    else sorted({"127.0.0.1", "localhost", config.HOST}),
+)
 
 
 @app.middleware("http")
@@ -464,7 +473,7 @@ def list_profiles() -> list[dict[str, Any]]:
 
 
 def _fit_limit(fit_display: bool) -> Optional[tuple[int, int]]:
-    """Physical panel bound for 'Fit this display' (None: off, or nothing to fit)."""
+    """Workarea bound for 'Fit this display' (None: off, or nothing to fit)."""
     return browser_mod.host_display_limit() if fit_display else None
 
 
@@ -724,10 +733,9 @@ def _regenerate(profile: Profile, os_name: str | None) -> FingerprintModel:
     # A profile whose panel fits this display keeps fitting after a re-roll, so a
     # 'Fit this display' profile doesn't silently stop opening headful.
     limit = browser_mod.host_display_limit()
-    if limit and not old.is_mobile:
-        pw, ph = fp_gen.physical_size(old.screen_width, old.screen_height, old.device_pixel_ratio)
-        if pw > limit[0] or ph > limit[1]:
-            limit = None
+    if limit and (old.is_mobile or not fp_gen.opens_in(old.os, old.screen_width, old.screen_height,
+                                                       old.device_pixel_ratio, limit)):
+        limit = None
     return FingerprintModel.from_fingerprint(fp_gen.generate(os_name=os_name, max_physical_size=limit))
 
 

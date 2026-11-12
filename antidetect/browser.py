@@ -174,15 +174,12 @@ def _drop_unsupported(cfg: dict[str, Any], exe: str | None) -> None:
 # of that device could produce; anything else is refused with DisplayFitError.
 
 _HOST_LINUX = sys.platform.startswith("linux")
-# Smallest window a fitted (restored, not maximised) desktop window may shrink to,
-# absolute and as a share of the profile's screen. Below that it reads as a bot.
-_MIN_FIT_WINDOW = (1024, 600)
-_MIN_FIT_SHARE = 0.6
-# Gap a fitted window keeps from the workarea edges, drawn per profile so that a
-# FITTED window's outerWidth * dpr never equals the operator's workarea (a
-# cross-profile watermark). An unfitted window is the profile's own and host-free.
-_FIT_INSET_W = (32, 128)
-_FIT_INSET_H = (24, 80)
+# A fitted axis steps down the profile's OWN ladder of sizes (first rung a seeded
+# share of its screen, then fixed steps, ending at fp_mod.min_window) and takes the
+# largest rung that fits. The ladder never reads the host, so a fitted window tells
+# a site only "this rung fit", not the operator's workarea in pixels.
+_FIT_FIRST_RUNG = (0.85, 0.95)
+_FIT_STEP = 0.07
 
 
 class DisplayFitError(BrowserError, ValueError):
@@ -227,8 +224,10 @@ def virtual_display_available() -> bool:
 def _render_scale(fp) -> float:
     """Monitor pixels per CSS px of the profile's window (Camoufox's `_physical_scale`).
 
-    Only Linux renders at the profile's DPR; on Windows and macOS the host's own
-    scaling is already in the (CSS px) display bounds, so it's 1 there.
+    Measured on Linux only, where the window renders at the profile's DPR. Windows
+    and macOS assume 1 (the host's own scaling is in their CSS-px display bounds),
+    matching Camoufox; that is UNVERIFIED there, and Camoufox sets devPixelsPerPx
+    on every OS, so a DPR > 1 profile may overflow a 100%-scaled Windows monitor.
     """
     return float(fp.device_pixel_ratio or 1) if _HOST_LINUX else 1.0
 
@@ -319,8 +318,10 @@ def _host_workarea() -> tuple[int, int] | None:
         return None
     w, h = mon.width, mon.height
     # ponytail: workarea only from X11/XWayland _NET_WORKAREA; Windows/macOS fall
-    # back to full monitor bounds (their DPR scale is 1, so the HiDPI failure can't
-    # happen there). Add SPI_GETWORKAREA / NSScreen.visibleFrame if needed.
+    # back to full monitor bounds (scale assumed 1 there, see _render_scale). Add
+    # SPI_GETWORKAREA / NSScreen.visibleFrame once that is measured.
+    # ponytail: sized for the largest monitor, not the one the window opens on;
+    # place the window on that monitor or size for the primary if users hit it.
     # A multi-monitor workarea spans every monitor, so cap it by the one we size for.
     if work:
         w, h = min(w, work[0]), min(h, work[1])
@@ -328,22 +329,12 @@ def _host_workarea() -> tuple[int, int] | None:
 
 
 def host_display_limit() -> tuple[int, int] | None:
-    """Largest physical panel (css x DPR) whose profiles can open headful here.
+    """Workarea (monitor px) 'Fit this display' profiles must open in (fp_mod.opens_in).
 
-    Only Linux ties the window to the profile's DPR, so only there does the
-    profile's panel have to fit; elsewhere this is None (no constraint).
+    Only Linux ties the window to the profile's DPR, so only there is there a
+    constraint; elsewhere this is None.
     """
-    if not _HOST_LINUX:
-        return None
-    try:
-        from camoufox.display import has_display, largest_display
-    except ImportError:
-        return None
-    if not has_display(os.environ):
-        return None
-    with _DISPLAY_PROBE_LOCK:
-        mon = largest_display()
-    return (mon.width, mon.height) if mon else None
+    return _host_workarea() if _HOST_LINUX else None
 
 
 @contextmanager
@@ -363,8 +354,29 @@ def virtual_display(headless: Any) -> Iterator[str | None]:
 
 
 def _is_headful(headless: Any) -> bool:
-    """A real window on the operator's display (not headless, not Xvfb)."""
+    """A real window on the operator's display (not headless, not Xvfb).
+
+    Only None/False/True/"virtual" are modes: anything else (0, "true") would skip
+    the fit check here yet still launch headful, so it is refused.
+    """
+    if not (headless is None or headless is False or headless is True or headless == "virtual"):
+        raise ValueError(f'headless must be None, False, True or "virtual", not {headless!r}')
     return headless is None or headless is False
+
+
+def _fit_axis(size: int, avail_px: int, scale: float, floor: int, seed: str) -> int | None:
+    """`size` if it fits `avail_px`, else the largest rung of this profile's own
+    ladder that does (see _FIT_FIRST_RUNG); None if even `floor` doesn't."""
+    import random
+
+    if size * scale <= avail_px:
+        return size
+    share = random.Random(seed).uniform(*_FIT_FIRST_RUNG)
+    while (rung := int(size * share)) > floor:
+        if rung * scale <= avail_px:
+            return rung
+        share -= _FIT_STEP
+    return floor if floor * scale <= avail_px else None
 
 
 def window_size(profile: Profile, headless: Any = False) -> tuple[int, int]:
@@ -375,9 +387,9 @@ def window_size(profile: Profile, headless: Any = False) -> tuple[int, int]:
     Headful, that same window is used whenever it fits. If not:
       - phones keep their exact screen-sized window (a phone in a shrunken desktop
         window is an instant tell) -> DisplayFitError;
-      - desktops become a restored window within the workarea, inset by a
-        per-profile margin, if that is still a believable window for the screen;
-        otherwise DisplayFitError.
+      - desktops become a restored window: each overflowing axis (only those)
+        steps down the profile's own size ladder to the largest rung that fits,
+        never below fp_mod.min_window; otherwise DisplayFitError.
     """
     fp = profile.fingerprint.to_fingerprint()
     w = fp.screen_width
@@ -391,14 +403,10 @@ def window_size(profile: Profile, headless: Any = False) -> tuple[int, int]:
     if w * scale <= avail[0] and h * scale <= avail[1]:
         return w, h
     if not fp.is_mobile:
-        import random
-
-        rng = random.Random(f"{profile.id}:window")
-        fw = min(w, int(avail[0] // scale) - rng.randint(*_FIT_INSET_W))
-        fh = min(h, int(avail[1] // scale) - rng.randint(*_FIT_INSET_H))
-        min_w = max(_MIN_FIT_WINDOW[0], _MIN_FIT_SHARE * fp.screen_width)
-        min_h = max(_MIN_FIT_WINDOW[1], _MIN_FIT_SHARE * fp.screen_height)
-        if fw >= min(min_w, w) and fh >= min(min_h, h):
+        min_w, min_h = fp_mod.min_window(fp.os, fp.screen_width, fp.screen_height)
+        fw = _fit_axis(w, avail[0], scale, min_w, f"{profile.id}:window:w")
+        fh = _fit_axis(h, avail[1], scale, min_h, f"{profile.id}:window:h")
+        if fw and fh:
             return fw, fh
     raise DisplayFitError(profile.id, (w, h), scale, avail, fp.is_mobile)
 
@@ -585,6 +593,15 @@ def camoufox_launch_options(profile: Profile, headless: Any = None,
         opts["virtual_display"] = virtual_display
     if "pin_cpu_cores" in inspect.signature(launch_options).parameters:
         opts["pin_cpu_cores"] = False  # what Camoufox's own launcher defaults to
+    if not opts["headless"]:
+        # Camoufox would probe the monitor itself (get_screen_cons) outside our
+        # Xlib lock; do the same probe under it and hand the result over.
+        from camoufox.utils import get_screen_cons
+
+        with _DISPLAY_PROBE_LOCK:
+            screen = get_screen_cons(False)
+        if screen is not None:
+            opts["screen"] = screen
     from_options = launch_options(**opts)
     fp = profile.fingerprint.to_fingerprint()
     _apply_overrides(from_options, fp.mobile_overrides(fp_mod._firefox_major(_engine_exe())))

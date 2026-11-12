@@ -91,8 +91,8 @@ function saveView() {
 
 const launchErrors = {};   // profile id -> last launch error message
 
-// Host display facts for headful launches: fit_limit is the largest physical panel
-// a profile may have to open in a window here (null when it doesn't matter).
+// Host display facts for headful launches: fit_limit is the workarea (monitor px)
+// a profile's window must open in here (null when it doesn't matter).
 let displayInfo = { fit_limit: null, virtual_available: false };
 api("/api/display").then((d) => { displayInfo = d; syncFitRows(); }).catch(() => {});
 

@@ -78,7 +78,7 @@ class FingerprintModel(BaseModel):
     timezone: str = "America/New_York"
     # deep randomization vectors (defaults keep older stored profiles valid)
     color_depth: int = 24
-    device_pixel_ratio: float = 1.0
+    device_pixel_ratio: float = Field(1.0, gt=0, le=4)
     max_touch_points: int = 0
     do_not_track: str = "unspecified"
     audio_sample_rate: int = 48000

@@ -269,7 +269,23 @@ Playwright driver that launches it *is* bundled.
   it stays a believable window for that screen; phones, and desktops that would have
   to shrink below that, are refused rather than given a fake geometry. Launch them
   in a virtual display (Linux, needs `Xvfb`), or create profiles with **Fit this
-  display** ticked, which only draws real displays whose panel fits your monitor.
+  display** ticked, which only draws real displays that can open in your workarea
+  (and no phones when the OS is random).
+
+  Known limits:
+  - **Phones** render at their real DPR (e.g. 2.625), so almost none fit any
+    landscape monitor, 4K included. Run them in a virtual display or headless, or
+    use the Chromium engine for interactive mobile work.
+  - **Virtual display** renders WebGL in software, which a site can measure even
+    though the GPU strings claim hardware. It is no safer than headless there.
+    Camoufox starts Xvfb with access control off (`-ac`): other local users can
+    connect to it, so avoid virtual mode on shared machines.
+  - **Fitted windows** come from the profile's own size ladder, so they reveal
+    only a coarse bound on your display. A host with a small workarea still
+    narrows which screens "Fit this display" can draw.
+  - **Untested:** Windows and macOS hosts (scale is assumed to be 1 there),
+    HiDPI hosts with desktop scaling above 100%, and multi-monitor setups (sizing
+    uses the largest monitor, the window may open on another).
 - **A launch shows "⚠ failed"**: click the pill for a short explanation. The full
   traceback is in `~/.antidetect/error.log`.
 - **`WebGLRenderingContext.getParameter(RENDERER)` shows your real GPU** while the

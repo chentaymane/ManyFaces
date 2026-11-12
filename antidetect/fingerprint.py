@@ -8,6 +8,7 @@ looks like the same real machine every session.
 """
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field, asdict
 from typing import Any
@@ -68,18 +69,41 @@ def physical_size(width: int, height: int, dpr: float) -> tuple[int, int]:
     return round(width * dpr), round(height * dpr)
 
 
-def displays(os_name: str, max_physical_size: tuple[int, int] | None = None) -> list[tuple[int, int, float]]:
-    """The OS's display catalogue, optionally only panels within `max_physical_size`.
+# Smallest window a fitted (restored, not maximised) desktop window may shrink to,
+# absolute and as a share of the profile's screen. Below that it reads as a bot.
+_MIN_FIT_WINDOW = (1024, 600)
+_MIN_FIT_SHARE = 0.6
 
-    An empty filter result falls back to the whole catalogue: a fingerprint is
-    still needed, and the launch reports precisely why it can't open on this host.
+
+def min_window(os_name: str, width: int, height: int) -> tuple[int, int]:
+    """Smallest believable desktop window (CSS px) for a `width` x `height` screen.
+
+    The browser never shrinks a headful window below this to fit a display.
+    """
+    full_h = height - _TASKBAR.get(os_name, 0)
+    return (min(width, math.ceil(max(_MIN_FIT_WINDOW[0], _MIN_FIT_SHARE * width))),
+            min(full_h, math.ceil(max(_MIN_FIT_WINDOW[1], _MIN_FIT_SHARE * height))))
+
+
+def opens_in(os_name: str, width: int, height: int, dpr: float, area: tuple[int, int]) -> bool:
+    """Whether a desktop with this screen can open headful in `area` monitor pixels
+    (Linux renders at the profile's DPR), at most shrunk to its `min_window`."""
+    mw, mh = min_window(os_name, width, height)
+    return math.ceil(mw * dpr) <= area[0] and math.ceil(mh * dpr) <= area[1]
+
+
+def displays(os_name: str, max_physical_size: tuple[int, int] | None = None) -> list[tuple[int, int, float]]:
+    """The OS's display catalogue, optionally only those that can open headful in a
+    `max_physical_size` workarea (monitor pixels; see `opens_in`).
+
+    When none can, the smallest panel is returned: a fingerprint is still needed,
+    and the launch reports precisely why it can't open on this host.
     """
     rows = _DISPLAYS.get(os_name, _DISPLAYS["windows"])
     if not max_physical_size:
         return rows
-    mw, mh = max_physical_size
-    fit = [r for r in rows if physical_size(*r)[0] <= mw and physical_size(*r)[1] <= mh]
-    return fit or rows
+    fit = [r for r in rows if opens_in(os_name, *r, max_physical_size)]
+    return fit or [min(rows, key=lambda r: physical_size(*r)[0] * physical_size(*r)[1])]
 
 # Core counts an Apple Silicon Mac ships with.
 _APPLE_SILICON_CORES = [8, 8, 10, 10, 12, 16]
@@ -737,10 +761,11 @@ def generate(
     profiles. Pass `device` (a preset name from `list_mobile_devices()`) to pin a
     specific phone model; it overrides `os_name`.
 
-    `max_physical_size` keeps a desktop's real panel (css size x DPR) within the
-    given pixels, so it can open headful on that display. It only picks among
-    real displays; it never invents a resolution. Phones are fixed devices and
-    ignore it.
+    `max_physical_size` (a workarea, in monitor pixels) keeps a desktop to real
+    displays that can open headful there (`opens_in`); it never invents a
+    resolution. Phones are fixed devices that never fit a landscape monitor at
+    their DPR, so a random OS draw under a limit is desktop-only, and an explicit
+    phone ignores it.
     """
     rng = random.Random(seed) if seed else random
     if device:
@@ -750,7 +775,8 @@ def generate(
             return _generate_ios(rng, tup) if kind == "ios" else _generate_android(rng, tup)
         # Unknown device name: fall back to os-based generation below.
     if os_name is None:
-        os_name = rng.choice(_RANDOM_OS_POOL)
+        pool = [o for o in _RANDOM_OS_POOL if o not in _MOBILE_OS] if max_physical_size else _RANDOM_OS_POOL
+        os_name = rng.choice(pool)
     if os_name == "ios":
         return _generate_ios(rng)
     if os_name in _MOBILE_OS:

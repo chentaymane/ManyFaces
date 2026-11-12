@@ -55,21 +55,31 @@ class FingerprintDisplayTests(unittest.TestCase):
         for os_name in ("windows", "linux"):
             for i in range(400):
                 fp = F.generate(os_name, seed=f"m{i}", max_physical_size=(1920, 1080))
-                pw, ph = F.physical_size(fp.screen_width, fp.screen_height, fp.device_pixel_ratio)
-                self.assertLessEqual((pw, ph)[0], 1920)
-                self.assertLessEqual(ph, 1080)
-                self.assertFalse(fp.screen_width >= 1920 and fp.device_pixel_ratio > 1)
+                self.assertTrue(F.opens_in(os_name, fp.screen_width, fp.screen_height,
+                                           fp.device_pixel_ratio, (1920, 1080)))
+                self.assertNotEqual((fp.screen_width, fp.device_pixel_ratio), (1920, 2.0))
                 seen.add((fp.screen_width, fp.screen_height, fp.device_pixel_ratio))
         self.assertIn((1536, 864, 1.25), seen)
         self.assertIn((1280, 720, 1.5), seen)
 
-    def test_unsatisfiable_limit_falls_back_to_real_displays(self):
-        fp = F.generate("macos", seed="x", max_physical_size=(800, 600))
-        self.assertIn((fp.screen_width, fp.screen_height, fp.device_pixel_ratio), F._DISPLAYS["macos"])
+    def test_unsatisfiable_limit_falls_back_to_the_smallest_real_panel(self):
+        smallest = min(F._DISPLAYS["macos"], key=lambda r: F.physical_size(*r)[0] * F.physical_size(*r)[1])
+        for i in range(10):
+            fp = F.generate("macos", seed=f"x{i}", max_physical_size=(800, 600))
+            self.assertEqual((fp.screen_width, fp.screen_height, fp.device_pixel_ratio), smallest)
+
+    def test_small_hosts_still_get_screen_variety(self):
+        seen = {(fp.screen_width, fp.screen_height, fp.device_pixel_ratio)
+                for fp in (F.generate("windows", seed=f"s{i}", max_physical_size=(1366, 768)) for i in range(200))}
+        self.assertGreater(len(seen), 1)
 
     def test_phones_ignore_the_limit(self):
         fp = F.generate("android", seed="p", max_physical_size=(800, 600))
         self.assertTrue(fp.is_mobile)
+
+    def test_random_os_under_a_limit_is_desktop_only(self):
+        for i in range(200):
+            self.assertFalse(F.generate(seed=f"r{i}", max_physical_size=(1920, 1080)).is_mobile)
 
     def test_normalize_repairs_impossible_screen_dpr_pairs(self):
         fp = dataclasses.replace(F.generate("windows", seed="n"), screen_width=1920,
@@ -103,6 +113,40 @@ class WindowFitTests(unittest.TestCase):
         p = profile("windows", screen_width=1536, screen_height=864, device_pixel_ratio=1.25)
         with linux_host((1920, 1040)):
             self.assertEqual(browser.window_size(p, False), browser.window_size(p, True))
+
+    def test_fitted_size_does_not_depend_on_the_exact_workarea(self):
+        # The ladder is the profile's own: sweeping the workarea across 900 px yields
+        # a handful of rungs, not one size per pixel, so a fitted window can't be used
+        # to measure the operator's display.
+        for i in range(12):
+            p = profile("windows", pid=f"lad{i:09d}", screen_width=2560, screen_height=1440, device_pixel_ratio=1.0)
+            widths = set()
+            for aw in range(1540, 2440, 3):
+                with linux_host((aw, 1440)):
+                    widths.add(browser.window_size(p, False)[0])
+            self.assertLessEqual(len(widths), 6, widths)
+
+    def test_only_the_overflowing_axis_shrinks(self):
+        p = profile("linux", screen_width=1920, screen_height=1080, device_pixel_ratio=1.0)
+        with linux_host((1920, 1050)):
+            fw, fh = browser.window_size(p, False)
+        self.assertEqual(fw, 1920)
+        self.assertLess(fh, 1050)
+        self.assertGreaterEqual(fh, 648)
+
+    def test_shrinks_to_the_floor_when_only_the_floor_fits(self):
+        p = profile("windows", screen_width=1920, screen_height=1080, device_pixel_ratio=1.0)
+        floor = F.min_window("windows", 1920, 1080)
+        with linux_host((floor[0], 1080)):
+            self.assertEqual(browser.window_size(p, False)[0], floor[0])
+        with linux_host((floor[0] - 1, 1080)), self.assertRaises(browser.DisplayFitError):
+            browser.window_size(p, False)
+
+    def test_unknown_headless_values_are_refused(self):
+        p = profile("windows", screen_width=1920, screen_height=1080, device_pixel_ratio=2.0)
+        for bad in (0, 1, "true", "false", "Virtual"):
+            with linux_host((1920, 1080)), self.assertRaises(ValueError):
+                browser.window_size(p, bad)
 
     def test_fit_inset_is_stable_per_profile_and_varies_between_profiles(self):
         sizes = set()
@@ -214,6 +258,18 @@ class CamoufoxLaunchOptionsTests(IsolatedData):
         self.assertFalse(opts["headless"])
         self.assertEqual((cfg["window.outerWidth"], cfg["window.outerHeight"]), (2560, 1392))
 
+    def test_camoufox_monitor_probe_runs_under_our_xlib_lock(self):
+        import camoufox.utils as cu
+        from camoufox.display import DisplaySize
+
+        def probe():
+            self.assertTrue(browser._DISPLAY_PROBE_LOCK.locked(), "unlocked Xlib probe")
+            return DisplaySize(1920, 1080)
+
+        p = profile("windows", screen_width=1536, screen_height=864, device_pixel_ratio=1.25)
+        with patch.object(cu, "largest_display", probe):
+            self.final_config(p, False)
+
     def test_phone_renders_at_its_own_dpr(self):
         p = profile("android", screen_width=412, screen_height=915, device_pixel_ratio=2.625)
         opts, cfg = self.final_config(p, True)
@@ -224,7 +280,7 @@ class CamoufoxLaunchOptionsTests(IsolatedData):
 class DisplayFitApiTests(IsolatedData):
     def setUp(self):
         super().setUp()
-        self.client = TestClient(api.app)
+        self.client = TestClient(api.app, base_url="http://127.0.0.1")
 
     def test_unfit_headful_launch_is_409_with_numbers_and_no_side_effects(self):
         p = db.create(profile("macos", screen_width=1440, screen_height=900, device_pixel_ratio=2.0))
@@ -260,13 +316,25 @@ class DisplayFitApiTests(IsolatedData):
             for _ in range(15):
                 r = self.client.post("/api/profiles", json={"name": "f", "os": "macos", "fit_display": True})
                 fp = r.json()["fingerprint"]
-                pw, ph = F.physical_size(fp["screen_width"], fp["screen_height"], fp["device_pixel_ratio"])
-                self.assertLessEqual(pw, 1920)
-                self.assertLessEqual(ph, 1080)
-            r = self.client.post("/api/profiles/bulk", json={"count": 5, "os": "linux", "fit_display": True, "seed_cookies": 0})
-            for prof in r.json()["profiles"]:
-                fp = prof["fingerprint"]
-                self.assertLessEqual(F.physical_size(fp["screen_width"], fp["screen_height"], fp["device_pixel_ratio"])[0], 1920)
+                self.assertTrue(F.opens_in("macos", fp["screen_width"], fp["screen_height"],
+                                           fp["device_pixel_ratio"], (1920, 1080)))
+            for os_name in ("linux", None):
+                r = self.client.post("/api/profiles/bulk", json={"count": 8, "os": os_name, "fit_display": True,
+                                                                  "seed_cookies": 0})
+                for prof in r.json()["profiles"]:
+                    fp = prof["fingerprint"]
+                    self.assertFalse(fp["is_mobile"])
+                    self.assertTrue(F.opens_in(fp["os"], fp["screen_width"], fp["screen_height"],
+                                               fp["device_pixel_ratio"], (1920, 1080)))
+
+    def test_foreign_host_header_is_refused(self):
+        self.assertEqual(self.client.get("/api/display", headers={"host": "evil.example"}).status_code, 400)
+        self.assertEqual(self.client.get("/api/display", headers={"host": "localhost:8000"}).status_code, 200)
+
+    def test_non_positive_dpr_is_rejected(self):
+        for dpr in (0, -1, 9):
+            with self.assertRaises(ValueError):
+                FingerprintModel(device_pixel_ratio=dpr)
 
     def test_display_info(self):
         with patch.object(browser, "host_display_limit", return_value=(1920, 1080)), \
@@ -287,6 +355,7 @@ class X11WorkareaTests(unittest.TestCase):
         with patch.dict("sys.modules", {"camoufox.display": fake}), patch.object(browser, "_HOST_LINUX", True), \
                 patch.object(browser, "_x11_workarea", return_value=(3840 + 1920, 1024)):
             self.assertEqual(browser._host_workarea(), (3840, 1024))
+            self.assertEqual(browser.host_display_limit(), (3840, 1024))
 
 
 
@@ -353,14 +422,13 @@ class ReviewRegressionTests(IsolatedData):
         self.assertEqual(err.required_px, (1442, 3217))
 
     def test_randomize_keeps_a_fitting_profile_fitting(self):
-        client = TestClient(api.app)
+        client = TestClient(api.app, base_url="http://127.0.0.1")
         p = db.create(profile("windows", screen_width=1536, screen_height=864, device_pixel_ratio=1.25))
         with patch.object(browser, "host_display_limit", return_value=(1920, 1080)):
             for _ in range(20):
                 fp = client.post(f"/api/profiles/{p.id}/fingerprint/randomize").json()["fingerprint"]
-                pw, ph = F.physical_size(fp["screen_width"], fp["screen_height"], fp["device_pixel_ratio"])
-                self.assertLessEqual(pw, 1920)
-                self.assertLessEqual(ph, 1080)
+                self.assertTrue(F.opens_in(fp["os"], fp["screen_width"], fp["screen_height"],
+                                           fp["device_pixel_ratio"], (1920, 1080)))
 
 
 if __name__ == "__main__":
