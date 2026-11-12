@@ -21,6 +21,9 @@ async function api(path, opts = {}) {
 let toastTimer = null;
 function toast(msg, kind = "ok") {
   const t = $("#toast");
+  const dialog = $(".modal[open]");
+  const container = dialog || document.body;
+  if (t.parentElement !== container) container.append(t);
   t.textContent = msg;
   t.className = `toast ${kind}`;
   clearTimeout(toastTimer);  // an older toast's timer must not hide this one early
@@ -42,24 +45,20 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-const OS_ICON = { windows: "🪟", macos: "🍎", linux: "🐧", android: "📱", ios: "🍏" };
-
 function engineBadge(engine) {
   const meta = {
-    chromium: { cls: "chromium", label: "🌐 Chromium", title: "Chromium engine" },
-    android: { cls: "android", label: "🤖 Android", title: "Real Android device (AVD emulator)" },
-  }[engine] || { cls: "camoufox", label: "🦊 Camoufox", title: "Camoufox (Firefox) engine" };
+    chromium: { cls: "chromium", label: "Chromium", title: "Chromium engine" },
+    android: { cls: "android", label: "Android", title: "Android emulator" },
+  }[engine] || { cls: "camoufox", label: "Camoufox", title: "Camoufox (Firefox) engine" };
   return `<span class="badge engine ${meta.cls}" title="${meta.title}">${meta.label}</span>`;
 }
 
 // ------------------------------------------------------------- render list ---
 function deviceCell(fp) {
   if (fp.is_mobile) {
-    const icon = fp.os === "ios" ? "🍏" : "📱";
-    return `<span class="badge device mobile">${icon} ${esc(fp.device_name || "Phone")}</span>`;
+    return esc(fp.device_name || "Phone");
   }
-  const label = { windows: "Windows", macos: "macOS", linux: "Linux" }[fp.os] || fp.os;
-  return `<span class="badge device">${OS_ICON[fp.os] || "💻"} ${esc(label)}</span>`;
+  return esc({ windows: "Windows", macos: "macOS", linux: "Linux" }[fp.os] || fp.os);
 }
 
 function proxyCell(p) {
@@ -70,7 +69,7 @@ function proxyCell(p) {
   if (p.proxy && p.proxy.host) {
     return `<span class="mono">${esc(p.proxy.type)}://${esc(p.proxy.host)}:${p.proxy.port}</span>`;
   }
-  return `<span class="dash">— direct</span>`;
+  return `<span class="sub">Direct connection</span>`;
 }
 
 // selection + filter state (the "select area")
@@ -92,7 +91,7 @@ function statusPill(p) {
   const st = p.status || (p.running ? "running" : "stopped");
   if (st === "launching") return `<span class="pill launching"><span class="spin"></span>starting…</span>`;
   if (st === "running") return `<span class="pill on"><span class="dot"></span>running</span>`;
-  if (st === "error") return `<span class="pill err" data-err="${p.id}" title="Click for details">⚠ failed</span>`;
+  if (st === "error") return `<button class="pill err" data-err="${p.id}" aria-label="Show launch error for ${esc(p.name)}">Failed</button>`;
   return `<span class="pill off"><span class="dot"></span>stopped</span>`;
 }
 
@@ -100,11 +99,12 @@ function renderList(profiles) {
   const body = $("#profiles-body");
   if (!profiles.length) {
     const msg = allProfiles.length
-      ? `No profiles match. <a href="#" id="clear-filter">Clear filters</a>`
-      : `No profiles yet. Click “+ New Profile” or “📱 New Phone”.`;
+      ? `<strong>No profiles match</strong><p>Try a different search or reset the filters.</p><button id="clear-filter">Reset filters</button>`
+      : `<strong>No profiles yet</strong><p>Create a profile to save browser settings and session data.</p><button class="primary" id="empty-create">Create profile</button>`;
     body.innerHTML = `<tr><td colspan="7" class="empty">${msg}</td></tr>`;
     const cf = $("#clear-filter");
-    if (cf) cf.onclick = (e) => { e.preventDefault(); activeFilter = "all"; $("#search").value = ""; renderStats(); applySearch(); };
+    if (cf) cf.onclick = () => { activeFilter = "all"; $("#search").value = ""; saveView(); renderFilters(); applySearch(); $("#search").focus(); };
+    $("#empty-create")?.addEventListener("click", () => openEditor(null));
     syncBulkBar();
     return;
   }
@@ -117,19 +117,24 @@ function renderList(profiles) {
       ? `<button class="sm" data-act="stop" data-id="${p.id}">Stop</button>`
       : `<button class="sm primary" data-act="start" data-id="${p.id}">Launch</button>`;
     return `<tr class="${sel ? "sel" : ""}">
-      <td class="col-check"><input type="checkbox" class="row-check" data-id="${p.id}" ${sel ? "checked" : ""} /></td>
-      <td><div class="name" title="${esc(p.notes || "")}">${esc(p.name)}</div><div class="sub">${(p.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}${fp.screen_width}×${fp.screen_height}</div></td>
-      <td>${deviceCell(fp)}<div class="sub">${engineBadge(p.engine)}</div></td>
-      <td>${proxyCell(p)}</td>
-      <td class="hide-sm"><div>${esc(fp.language)}</div><div class="sub">${esc(fp.timezone)}</div></td>
-      <td>${statusPill(p)}</td>
+      <td class="col-check"><input type="checkbox" class="row-check" aria-label="Select ${esc(p.name)}" data-id="${p.id}" ${sel ? "checked" : ""} /></td>
+      <td class="profile-cell"><div class="name" title="${esc(p.notes || "")}">${esc(p.name)}</div><div class="sub">${(p.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}${fp.screen_width} × ${fp.screen_height}</div></td>
+      <td class="device-cell">${deviceCell(fp)}<div class="sub">${engineBadge(p.engine)}</div></td>
+      <td class="proxy-cell">${proxyCell(p)}</td>
+      <td class="locale-cell"><div>${esc(fp.language)}</div><div class="sub">${esc(fp.timezone)}</div></td>
+      <td class="status-cell">${statusPill(p)}</td>
       <td class="actions-cell"><div class="actions">
         ${toggle}
-        <button class="sm" data-act="randomize" data-id="${p.id}" title="Regenerate fingerprint + fresh cookie jar">🎲</button>
-        <button class="sm" data-act="edit" data-id="${p.id}">Edit</button>
-        <button class="sm" data-act="cookies" data-id="${p.id}" title="Cookies: import / export / generate">🍪</button>
-        <button class="sm" data-act="clone" data-id="${p.id}" title="Clone profile">⧉</button>
-        <button class="sm danger" data-act="delete" data-id="${p.id}" title="Delete profile">🗑</button>
+        <button class="sm" data-act="edit" data-id="${p.id}" ${p.running ? 'disabled title="Stop this profile before editing"' : ""}>Edit</button>
+        <details class="more-actions">
+          <summary aria-label="More actions for ${esc(p.name)}">More</summary>
+          <div class="action-list">
+            <button data-act="cookies" data-id="${p.id}">Manage cookies</button>
+            <button data-act="clone" data-id="${p.id}">Clone profile</button>
+            <button data-act="randomize" data-id="${p.id}" ${p.running ? 'disabled title="Stop this profile before randomizing"' : ""}>Randomize fingerprint and cookies</button>
+            <button class="danger" data-act="delete" data-id="${p.id}">Delete profile</button>
+          </div>
+        </details>
       </div></td>
     </tr>`;
   }).join("");
@@ -155,25 +160,27 @@ function currentView() {
   });
 }
 
-function applySearch() { saveView(); renderList(currentView()); }
+function applySearch() {
+  const profiles = currentView();
+  const total = allProfiles.length;
+  const count = profiles.length === total ? `${total}` : `${profiles.length} of ${total}`;
+  $("#profile-count").textContent = `${count} profile${total === 1 ? "" : "s"}`;
+  renderList(profiles);
+}
 
-function renderStats() {
+function renderFilters() {
   const total = allProfiles.length;
   const running = allProfiles.filter((p) => p.running).length;
   const byEngine = {};
   allProfiles.forEach((p) => (byEngine[p.engine] = (byEngine[p.engine] || 0) + 1));
-  $("#stats").innerHTML = `
-    <div class="stat"><div class="stat-n">${total}</div><div class="stat-l">Profiles</div></div>
-    <div class="stat"><div class="stat-n on">${running}</div><div class="stat-l">Running</div></div>
-    <div class="stat wide"><div class="stat-engines">${Object.entries(byEngine).map(([e, n]) => `${engineBadge(e)}&nbsp;${n}`).join(" &nbsp; ") || "—"}</div><div class="stat-l">By engine</div></div>`;
-  const chips = [["all", "All", total], ["running", "● Running", running],
+  const chips = [["all", "All", total], ["running", "Running", running],
     ["stopped", "Stopped", allProfiles.filter((p) => p.status === "stopped").length],
-    ["error", "⚠ Failed", allProfiles.filter((p) => p.status === "error").length],
-    ["android", "🤖 Android", byEngine.android || 0], ["chromium", "🌐 Chromium", byEngine.chromium || 0],
-    ["camoufox", "🦊 Camoufox", byEngine.camoufox || 0]];
+    ["error", "Failed", allProfiles.filter((p) => p.status === "error").length],
+    ["android", "Android", byEngine.android || 0], ["chromium", "Chromium", byEngine.chromium || 0],
+    ["camoufox", "Camoufox", byEngine.camoufox || 0]];
   $("#filter-chips").innerHTML = chips
     .filter((c) => ["all", "running", "stopped", "error", activeFilter].includes(c[0]) || c[2] > 0)
-    .map(([k, label, n]) => `<button class="chip ${activeFilter === k ? "active" : ""}" data-filter="${k}">${label} <span>${n}</span></button>`).join("");
+    .map(([k, label, n]) => `<button class="chip" aria-pressed="${activeFilter === k}" data-filter="${k}">${label} <span>${n}</span></button>`).join("");
 }
 
 function syncBulkBar() {
@@ -208,24 +215,27 @@ async function loadProfiles() {
     // Drop selections for profiles that no longer exist.
     const ids = new Set(allProfiles.map((p) => p.id));
     [...selected].forEach((id) => { if (!ids.has(id)) selected.delete(id); });
-    $("#profile-count").textContent = `${allProfiles.length} profile${allProfiles.length === 1 ? "" : "s"}`;
-    renderStats();
+    renderFilters();
     applySearch();
     if (allProfiles.some((p) => p.status === "launching")) ensurePolling();
   } catch (e) {
     lastProfilesJSON = "";
-    $("#profiles-body").innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message)}</td></tr>`;
+    $("#profiles-body").innerHTML = `<tr><td colspan="7" class="empty"><strong>Could not load profiles</strong><p>${esc(e.message)}</p><button id="retry-profiles">Try again</button></td></tr>`;
+    $("#retry-profiles").addEventListener("click", loadProfiles);
   } finally { profilesLoading = false; }
 }
 
 $("#sort-order").value = sortOrder;
-$("#sort-order").addEventListener("change", (e) => { sortOrder = e.target.value; applySearch(); });
+$("#sort-order").addEventListener("change", (e) => { sortOrder = e.target.value; saveView(); applySearch(); });
 $("#search").addEventListener("input", applySearch);
 $("#head-check").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
 $("#bulk-master").addEventListener("change", (e) => toggleSelectAll(e.target.checked));
 $("#filter-chips").addEventListener("click", (e) => {
   const b = e.target.closest("[data-filter]"); if (!b) return;
-  activeFilter = b.dataset.filter; renderStats(); applySearch();
+  activeFilter = b.dataset.filter;
+  saveView();
+  $$("#filter-chips button").forEach((chip) => chip.setAttribute("aria-pressed", chip === b));
+  applySearch();
 });
 $("#profiles-body").addEventListener("change", (e) => {
   const cb = e.target.closest(".row-check"); if (!cb) return;
@@ -270,6 +280,11 @@ $("#profiles-body").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
   const { act, id } = btn.dataset;
+  const menu = btn.closest(".more-actions");
+  if (menu) {
+    menu.open = false;
+    menu.querySelector("summary").focus();
+  }
   try {
     if (act === "start") {
       btn.textContent = "Starting…"; btn.disabled = true;
@@ -292,9 +307,9 @@ $("#profiles-body").addEventListener("click", async (e) => {
       await api(`/api/profiles/${id}/randomize-all`, { method: "POST", body: JSON.stringify({ seed_cookies: 15 }) });
       toast("Fingerprint + cookies randomized");
     } else if (act === "edit") {
-      return openEditor(id);
+      return await openEditor(id);
     } else if (act === "cookies") {
-      return openCookies(id);
+      return await openCookies(id);
     }
     loadProfiles();
   } catch (err) {
@@ -437,9 +452,9 @@ async function openEditor(id) {
   let profile = null;
   if (id) profile = await api(`/api/profiles/${id}`);
   fillForm(profile);
-  $("#modal").classList.remove("hidden");
+  $("#modal").showModal();
 }
-function closeEditor() { $("#modal").classList.add("hidden"); }
+function closeEditor() { $("#modal").close(); }
 
 // Turn the pasted pool text into structured proxies via the server parser.
 async function collectPool() {
@@ -616,9 +631,9 @@ $("#pool-list").addEventListener("click", (e) => {
 });
 
 // -------------------------------------------------------------- bulk create ---
-$("#bulk-btn").addEventListener("click", () => $("#bulk-modal").classList.remove("hidden"));
-$("#bulk-close").addEventListener("click", () => $("#bulk-modal").classList.add("hidden"));
-$("#bulk-cancel").addEventListener("click", () => $("#bulk-modal").classList.add("hidden"));
+$("#bulk-btn").addEventListener("click", () => $("#bulk-modal").showModal());
+$("#bulk-close").addEventListener("click", () => $("#bulk-modal").close());
+$("#bulk-cancel").addEventListener("click", () => $("#bulk-modal").close());
 
 $("#bulk-create").addEventListener("click", async () => {
   const count = parseInt($("#bulk-count").value, 10);
@@ -634,7 +649,7 @@ $("#bulk-create").addEventListener("click", async () => {
     $("#bulk-create").textContent = "Creating…"; $("#bulk-create").disabled = true;
     const r = await api("/api/profiles/bulk", { method: "POST", body: JSON.stringify(body) });
     toast(`Created ${r.created} randomized profiles`);
-    $("#bulk-modal").classList.add("hidden");
+    $("#bulk-modal").close();
     loadProfiles();
   } catch (e) { toast(e.message, "err"); }
   finally { $("#bulk-create").textContent = "Create"; $("#bulk-create").disabled = false; }
@@ -690,7 +705,7 @@ async function openPhone() {
   $("#phone-device-info").textContent = "";
   $("#phone-device").innerHTML = `<option value="">Loading devices…</option>`;
   setPhoneMode("emulated");
-  $("#phone-modal").classList.remove("hidden");
+  $("#phone-modal").showModal();
   try {
     await loadDevices();
     fillPhoneDevices();
@@ -727,7 +742,7 @@ async function createPhone(launch) {
   if (android && launch) {
     const st = await api("/api/android/status");
     if (!st.ready) {
-      $("#phone-modal").classList.add("hidden");
+      $("#phone-modal").close();
       toast("Install the Android engine first", "err");
       return openAndroid();
     }
@@ -747,7 +762,7 @@ async function createPhone(launch) {
         start_url: $("#phone-url").value.trim() || "about:blank",
       }),
     });
-    $("#phone-modal").classList.add("hidden");
+    $("#phone-modal").close();
     if (launch) {
       btn.textContent = android ? "Booting…" : "Launching…";
       const r = await api(`/api/profiles/${created.id}/start`, { method: "POST" });
@@ -764,8 +779,8 @@ async function createPhone(launch) {
 }
 
 $("#phone-btn").addEventListener("click", openPhone);
-$("#phone-close").addEventListener("click", () => $("#phone-modal").classList.add("hidden"));
-$("#phone-cancel").addEventListener("click", () => $("#phone-modal").classList.add("hidden"));
+$("#phone-close").addEventListener("click", () => $("#phone-modal").close());
+$("#phone-cancel").addEventListener("click", () => $("#phone-modal").close());
 $("#phone-create").addEventListener("click", () => createPhone(false));
 $("#phone-launch").addEventListener("click", () => createPhone(true));
 
@@ -798,14 +813,19 @@ function renderAndroidStatus(st) {
 }
 
 async function openAndroid() {
-  $("#android-modal").classList.remove("hidden");
+  $("#android-modal").showModal();
   $("#android-log").classList.add("hidden-block");
+  $("#android-install").disabled = false;
   $("#android-status-box").textContent = "Checking…";
   try { renderAndroidStatus(await api("/api/android/status")); }
   catch (e) { $("#android-status-box").textContent = "Status check failed: " + e.message; }
   // If an install is already running (e.g. reopened modal), resume polling.
-  const ins = await api("/api/android/install/status");
-  if (ins.running) startAndroidPoll();
+  try {
+    const ins = await api("/api/android/install/status");
+    if (ins.running && $("#android-modal").open) startAndroidPoll();
+  } catch (e) {
+    if ($("#android-modal").open) toast(e.message, "err");
+  }
 }
 
 function startAndroidPoll() {
@@ -832,13 +852,14 @@ function startAndroidPoll() {
 async function installAndroid() {
   try {
     await api("/api/android/install", { method: "POST" });
-    startAndroidPoll();
+    if ($("#android-modal").open) startAndroidPoll();
   } catch (e) { toast(e.message, "err"); }
 }
 
 $("#android-install").addEventListener("click", installAndroid);
-$("#android-close").addEventListener("click", () => { $("#android-modal").classList.add("hidden"); clearInterval(androidPoll); });
-$("#android-cancel").addEventListener("click", () => { $("#android-modal").classList.add("hidden"); clearInterval(androidPoll); });
+$("#android-close").addEventListener("click", () => $("#android-modal").close());
+$("#android-cancel").addEventListener("click", () => $("#android-modal").close());
+$("#android-modal").addEventListener("close", () => clearInterval(androidPoll));
 
 // ------------------------------------------------------------------ cookies ---
 let cookieProfileId = null;
@@ -852,9 +873,9 @@ async function openCookies(id) {
   $("#cookie-json").value = "";
   $("#cookie-count").value = "10";
   await refreshCookieInfo();
-  $("#cookie-modal").classList.remove("hidden");
+  $("#cookie-modal").showModal();
 }
-const closeCookies = () => { $("#cookie-modal").classList.add("hidden"); loadProfiles(); };
+const closeCookies = () => { $("#cookie-modal").close(); loadProfiles(); };
 $("#cookie-close").addEventListener("click", closeCookies);
 $("#cookie-done").addEventListener("click", closeCookies);
 $("#cookie-add").addEventListener("click", async () => {
@@ -981,12 +1002,29 @@ $("#engine-download").addEventListener("click", async () => {
   } catch (e) { toast(e.message, "err"); }
 });
 
-// close any modal on backdrop click or Escape
-$$(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.classList.add("hidden"); }));
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  const open = $$(".modal:not(.hidden)");
-  if (open.length) open[open.length - 1].classList.add("hidden");
+// Native dialogs handle Escape and keep keyboard focus inside.
+$$(".modal").forEach((dialog) => {
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    const toast = $("#toast");
+    if (toast.parentElement === dialog) document.body.append(toast);
+  });
+});
+
+document.addEventListener("click", (event) => {
+  $$(".more-actions[open]").forEach((menu) => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || $(".modal[open]")) return;
+  const menu = $(".more-actions[open]");
+  if (menu) {
+    menu.open = false;
+    menu.querySelector("summary").focus();
+  }
 });
 
 // ---------------------------------------------------------------------- init ---
