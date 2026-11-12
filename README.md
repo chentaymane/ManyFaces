@@ -1,339 +1,138 @@
-# ManyFaces
-
-A multi-profile anti-detect browser manager — the open, self-hosted equivalent of
-Dolphin Anty / Multilogin / GoLogin. Each profile is a fully isolated browser
-identity: its own persistent storage and cookies, its own **coherent** fingerprint,
-and its own proxy.
-
-The default engine is **[Camoufox](https://camoufox.com/)** — a patched build of
-Firefox that spoofs fingerprints (canvas, WebGL, fonts, WebRTC, navigator, screen,
-audio) at the **native C++ level**. That is dramatically harder to detect than the
-JavaScript injection most DIY tools use, and it passes CreepJS, BrowserScan,
-Pixelscan and BrowserLeaks out of the box.
-
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="ManyFaces dashboard: profiles across Camoufox, Chromium and Android engines, with live status, proxies and tags" width="900">
+  <img src="web/logo.png" width="72" height="72" alt="" />
 </p>
 
-Each profile can instead run on **Chromium** (for sites that block Firefox, and for
-true mobile emulation) or on a **real Android device** in the official emulator (a
-genuine Chrome-for-Android engine — nothing spoofed, because it *is* a phone). All
-three are selectable per profile.
+<h1 align="center">ManyFaces</h1>
 
-## Screenshots
-
-| | |
-|---|---|
-| <img src="docs/screenshots/profile-editor.png" alt="Profile editor with proxy settings, hardening toggles and the pinned fingerprint" width="430"> | <img src="docs/screenshots/new-phone.png" alt="New phone dialog: pick a real device preset, emulated or real Android" width="380"> |
-| **Profile editor**: engine, tags and notes, proxy (manual / random / rotate pool), hardening toggles, and the exact fingerprint the profile presents. | **📱 New Phone**: pick a real device preset (Pixel, Galaxy, OnePlus, Xiaomi, iPhone) and create and launch it in one click. |
-| <img src="docs/screenshots/bulk-actions.png" alt="Bulk actions bar with three profiles selected" width="430"> | <img src="docs/screenshots/phone-camoufox.png" alt="A Galaxy S24 phone profile running on Camoufox, showing the built-in phone home screen" width="190"> |
-| **Bulk actions**: select profiles to launch, stop, randomize, export or delete them together. Filter by engine or running state, and search names, tags and notes. | **A phone profile on Camoufox** (Galaxy S24: 384×832 @ 2.8125x, Firefox-for-Android UA, Adreno GPU, touch), landing on the built-in phone home screen. |
+<p align="center">A local browser profile manager for keeping accounts and test environments separate.</p>
 
 <p align="center">
-  <img src="docs/screenshots/engine-setup.png" alt="Engine setup banner offering the one-time Camoufox download" width="900"><br>
-  <em>First run: the Camoufox browser downloads from inside the app (resumable, with live progress).</em>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#browser-engines">Browser engines</a> ·
+  <a href="#build-and-package">Build and package</a> ·
+  <a href="#development">Development</a>
 </p>
 
-## Legitimate use
+<img src="docs/screenshots/dashboard.png" width="1200" alt="ManyFaces dashboard with search, filters, and profile actions" />
 
-Anti-detect browsers are standard tooling for **multi-account management on your own
-accounts**: agencies running many client ad/social accounts, e-commerce sellers with
-multiple storefronts, QA teams testing geo/device variations, privacy research, and
-web scraping of public data. This project is for those uses.
+ManyFaces keeps browser storage, proxy settings, and device settings per profile.
+Use it for accounts you manage, browser QA, and testing across devices and regions.
+Follow the rules of the sites you access.
 
-**Do not** use it to violate the terms of service of sites you access, to commit
-fraud, to evade bans you were legitimately given, or to create fake identities.
-Those uses are illegal in many jurisdictions and are not supported.
+## Quick start
 
-## Features
+Install the Python dependencies and start the dashboard on Windows, Linux, or macOS.
 
-- **Dashboard organization** — sort by name, creation date, or last update;
-  filter stopped and failed profiles; search proxy hosts and timezones alongside
-  names, tags, and notes. Filter and sort choices are remembered on this browser.
-  Background tabs pause profile refreshes, overlapping requests are prevented,
-  and unchanged results preserve the existing table rows.
-- **Safer profile management** — live profiles must be stopped before changing
-  settings or fingerprints. Invalid input returns a validation error, imports
-  report invalid entries individually, and staged cookie files are replaced
-  atomically. Proxy lists support IPv6 and URL-encoded credentials.
-
-- **Three browser engines, per profile** — pick **Camoufox** (patched Firefox, the
-  strongest native-level stealth), **Chromium** (Playwright Chromium), or **Android**
-  (a real device) on each profile. Chromium is for sites that block Firefox, and it
-  renders phone profiles as a **true mobile interface** (real device viewport, high
-  DPR, touch, mobile layout) — emulation Firefox/Gecko can't do. Fingerprints
-  (navigator, screen, WebGL GPU strings, touch) are pinned on both Camoufox and
-  Chromium and stay identical across launches; `navigator.webdriver` is hidden on
-  Chromium too. (The Android engine is a real device, so there's nothing to pin.)
-- **Real Android engine (AVD)** — for a phone that isn't emulated at all: the
-  **Android** engine boots a genuine Android device in the official Android Emulator,
-  so the browser inside is real **Chrome-for-Android** (real ARM-ish Blink, real
-  touch/GPU) — nothing spoofed, because it *is* a phone. It's free and set up in one
-  click from the app: the installer fetches the Android SDK + a system image (a few
-  GB), **scrcpy** (the mirror window), and, if needed, a small Java runtime, streaming
-  live progress. The device runs **headless** and is shown through the scrcpy mirror
-  — a clean window with real touch/keyboard input — which sidesteps the emulator's own
-  window (it black-screens on many PCs: a missing `opengl32sw` / layered-window bug in
-  the emulator's Qt UI, unrelated to the phone itself). Requires hardware
-  virtualization (WHPX / KVM / Hypervisor.framework) and uses **hardware GPU**
-  rendering for speed. The first boot of a device takes ~1–2 min; after that it
-  **quickboots in seconds** (a snapshot is saved on close and restored next launch).
-  Trade-off vs the emulated engines: each profile is one Android VM (real RAM/CPU,
-  ~4–5 GB disk), so it's for authenticity, not running dozens at once.
-  Proxy support is limited to an **unauthenticated HTTP/HTTPS** proxy (the emulator
-  can't take SOCKS or user/password proxies on its command line); such proxies apply
-  to the emulated engines but not to Android profiles.
-- **Desktop app** — runs in a native window (pywebview / WebView2), not a browser
-  tab. `python desktop.py`.
-- **Profile management** — create, edit, clone, delete, and **bulk-create** N
-  fully-randomized profiles at once. Fully isolated persistent storage per profile
-  (`~/.antidetect/profiles/<id>`).
-- **One-click phone profiles** — a dedicated **📱 New Phone** button: pick a real
-  device (Pixel, Galaxy, OnePlus, Xiaomi, or iPhone presets) and hit **Create &
-  launch**. Phone profiles default to the **Chromium** engine, which renders them as
-  a true phone — real mobile viewport, high DPR, touch, and mobile page layout — with
-  a coherent per-device fingerprint (UA, screen, GPU strings, touch) pinned across
-  launches. The window opens like a **phone emulator**: a chromeless, phone-shaped
-  portrait window (no tabs or address bar — just the screen) sized to the exact
-  device resolution. It lands on a built-in **phone home screen** (clock, a
-  search/address box, and quick-launch app icons) instead of a blank page, and every
-  page shows floating on-screen **‹ › back/forward buttons** — so there's always
-  something to see and a way to navigate (`Alt`+`←`/`→` and the mouse back button
-  work too). On the **Camoufox** engine, phones instead run a coherent
-  Firefox-for-Android identity (mobile UA, phone screen + DPR, `Linux armv8l`
-  platform, mobile GPU strings, Android-only font set). iPhone is offered on both,
-  but is a weaker spoof than Android (an iPhone runs WebKit while both engines are
-  non-WebKit), so an engine-level probe can still tell.
-- **Deep fingerprint spoofing** — a coherent device fingerprint where *everything*
-  agrees and stays identical across launches. Randomized and pinned per profile:
-  - OS and user agent (always matching the Firefox version that actually runs),
-    GPU (drawn from Camoufox's real-device database, weighted by real-world
-    prevalence and kept plausible for the screen and core count), screen size,
-    colour depth, device-pixel-ratio
-  - CPU cores, locale, timezone, language, region
-  - **Canvas** anti-aliasing offset, **audio** sample rate, **font** set + metric
-    spacing seed (the real canvas/audio/font noise vectors)
-  - Battery state, media-device counts (cams/mics/speakers), max touch points,
-    Do-Not-Track, WebRTC local-IP
-  - Everything Camoufox draws on its own (font set, speech voices, deep WebGL
-    parameters, media devices, noise seeds) is seeded from the pinned identity, so
-    it stays the same across launches too.
-  - `navigator.webdriver` hidden. Verified on Camoufox 0.5.8 / Firefox 156:
-    two launches of one profile report identical UA, platform, screen, DPR, cores,
-    touch points, timezone and GPU strings, for desktop and phone profiles.
-  - Values Camoufox's coherence checks would reject (for example a Mac with a touchscreen or a
-    1.25 DPR, or Apple Silicon with 6 cores) are never generated. Profiles made by
-    older versions are migrated automatically at launch.
-- **Proxy management** — HTTP / HTTPS / SOCKS5 per profile, one-click live test
-  (exit IP, geo, latency), and GeoIP locale/timezone-matching to the proxy's country.
-- **Proxy pool & rotation** — paste a list of proxies (any common format:
-  `host:port`, `proto://host:port`, `host:port:user:pass`, `proto://user:pass@host:port`)
-  and pick a mode per profile: **manual** (one fixed proxy), **random** (a fresh pool
-  pick each launch), or **rotate** (round-robin through the pool, advancing every
-  launch). Test the whole pool at once — each proxy is verified concurrently for exit
-  IP, country and latency. Inspired by
-  [chameleon-ip-rotator](https://github.com/chentaymane/chameleon-ip-rotator).
-- **Profile import / export**: back up profiles or move them to another machine as
-  one JSON file (settings, pinned fingerprint, proxies and staged cookies). Select
-  profiles and click **⇩ Export**; restore with **⇪ Import**. Imported profiles get
-  new ids, so nothing is overwritten.
-- **Tags & notes**: label profiles (`client-a`, `shop`, …) and search by them.
-- **Cookie management** — import/export (Playwright JSON format) plus realistic
-  random cookie generation (proper GA/Facebook/DoubleClick formats across real
-  tracker domains) to warm up a profile's jar and verify isolation.
-- **One-click Randomize All** (🎲): regenerate a profile's entire fingerprint and reseed
-  a fresh cookie jar in one action. It keeps the device type: a Windows profile stays
-  Windows and a phone stays a phone of the same OS.
-- **Automation API** — drive any profile from your own Python scripts with the full
-  fingerprint/proxy/cookies applied (`antidetect.automate.launch`).
-
-## Setup (Windows, Linux & macOS)
-
-Runs on all three. The recommended way is browser mode (`run.py`) — it works
-everywhere with no GUI toolkit needed.
-
-```bash
-# 1. Install Python deps  (use python3 / pip3 on Linux & macOS)
-pip install -r requirements.txt
-
-# 2. Download the Camoufox browser for your OS (one-time, ~1.3 GB).
-#    Optional: the app shows a "Download engine" banner that does this for you.
-python -m camoufox fetch
-
-# 3. Start it — opens the dashboard in your normal browser
+```sh
+python -m pip install -r requirements.txt
 python run.py
 ```
 
-**Or just double-click a launcher** (does step 3 for you):
-- **Windows:** `START.bat`
-- **Linux / macOS:** `./start.sh`  (first run: `chmod +x start.sh`)
+The dashboard opens in your default browser. Use `python run.py --no-open` to start
+the server without opening a tab. You can also launch it with `START.bat` on
+Windows or `./start.sh` on Linux and macOS.
 
-### Optional engines
+For a desktop window, run `python desktop.py`. It uses pywebview and requires
+WebView2 on Windows or a supported WebView backend on Linux and macOS.
+Browser mode works without a desktop WebView.
 
-- **Chromium** — needed only for profiles set to the Chromium engine (including the
-  emulated phone profiles). Install the browser once:
-  ```bash
-  python -m playwright install chromium
-  ```
-- **Real Android** — no manual setup: pick the Android engine, then use the in-app
-  **one-click installer** on the Android setup screen. It fetches the Android SDK + a
-  system image (a few GB), the scrcpy mirror window, and a portable Java runtime if
-  your system Java is older than 17. Requires hardware virtualization (WHPX on
-  Windows, KVM on Linux, Hypervisor.framework on macOS).
+## Browser engines
 
-### Optional: native desktop window instead of a browser tab
+Choose an engine when creating or editing a profile.
 
-```bash
-python desktop.py
-```
-- **Windows** uses the Edge **WebView2** runtime (preinstalled on Windows 10/11).
-- **Linux/macOS** need a WebView backend for pywebview — install one of:
-  `pip install "pywebview[qt]"` (Qt) or the GTK stack
-  (`sudo apt install python3-gi gir1.2-webkit2-4.1` on Debian/Ubuntu).
-- If you'd rather not install those, just use `python run.py` — same app, in your
-  browser.
+| Engine | Use it for | First-time setup |
+| --- | --- | --- |
+| Camoufox | Firefox profiles with saved fingerprint settings | Select **Download engine** in the dashboard or run `python -m camoufox fetch`. |
+| Chromium | Chromium compatibility and emulated phone profiles | Run `python -m playwright install chromium`. |
+| Android | Chrome inside an Android emulator | Select **New phone → Android emulator → Create & boot** and follow the setup prompt. |
 
-## Portable package (recommended — no download, works offline)
+Camoufox uses the 0.5.x package specified in [requirements.txt](requirements.txt).
+The dashboard works before an engine is installed.
 
-The best way to ship this: a folder containing the app **and the browser engine
-together**, so the end user never downloads anything — they unzip and double-click.
+Android setup downloads the SDK, a system image, and the scrcpy mirror.
+Hardware virtualization improves boot and rendering performance. Allow roughly
+4–5 GB per Android profile. Android proxy settings support unauthenticated
+HTTP/HTTPS proxies.
 
-```bash
-pip install pyinstaller
-pyinstaller build.spec --noconfirm    # build the app exe
-python -m camoufox fetch              # ensure the browser is installed locally
-python package_portable.py            # bundle exe + browser -> dist/ManyFaces-Portable.zip
-```
+## Work with profiles
 
-This produces `dist/ManyFaces-Portable.zip`. The end user just unzips it and
-runs the app (`ManyFaces.exe` on Windows, `ManyFaces` on Linux); it
-finds the bundled `browser/` folder next to it and launches instantly — **no 1.3 GB
-download, no GitHub dependency, fully offline.** This sidesteps slow/flaky GitHub
-access entirely.
+- **Create and launch.** Use **New profile**, **New phone**, or **Bulk create**.
+  Phone profiles can use Chromium emulation or the Android emulator.
+- **Find profiles.** Search by name, tag, note, device, timezone, or proxy host.
+  Filter by status or engine and sort by name, creation, or last update. The
+  dashboard remembers your filter and sort choices in the current browser.
+- **Manage profiles.** Launch, stop, or edit a profile from its row. **More**
+  contains cookie tools, cloning, randomization, and deletion. On smaller
+  screens, each profile appears as a card with the same controls.
+- **Configure proxies.** Set one HTTP, HTTPS, or SOCKS5 proxy, or paste a pool
+  and select random or round-robin assignment. Test a proxy or pool before launch.
+- **Move settings.** Select profiles and choose **Export**, then use **Import**
+  to restore the JSON. Export includes settings, fingerprint data, proxy
+  credentials, and staged cookies. Treat it as sensitive. Browser history,
+  logins stored by the browser, and caches stay with the local profile.
 
-> Build on the OS you're targeting: the bundled Camoufox binary is platform-specific,
-> so build the Windows package on Windows and the Linux package on Linux. The same
-> `build.spec` / `package_portable.py` work on both (the spec omits the Windows-only
-> icon automatically on Linux).
+Metadata lives in `~/.antidetect/antidetect.db`, with browser data under
+`~/.antidetect/profiles/`. Set `ANTIDETECT_DATA_DIR` to use a different directory.
 
-## Build just the standalone .exe
+## Build and package
 
-If you prefer a single small exe that downloads the browser on first run (needs a
-working connection), build only the executable:
+Build on the target operating system.
 
-```bash
-pip install pyinstaller
+```sh
+python -m pip install pyinstaller
 pyinstaller build.spec --noconfirm
 ```
 
-The result is `dist/ManyFaces.exe` (~160 MB). Just launch it — it opens the
-native window and, on first run, downloads the Camoufox browser (~1.3 GB) into the
-user cache with an in-app progress screen (live %, MB, speed, and ETA).
+The standalone app downloads Camoufox on demand. To distribute it with
+Camoufox bundled, install the engine and build the portable archive.
 
-The downloader is built for slow/flaky links (e.g. throttled GitHub access):
-- **8 parallel connections** to beat per-connection throttling (~2× faster).
-- **Resumable** — progress is saved to disk, so a dropped connection *or even closing
-  and reopening the app* continues from where it stopped, never restarting the whole download.
-- **Verified** — the finished archive is checked against the release's SHA-256 and
-  installed by Camoufox's own installer, exactly like `camoufox fetch`.
-- **Self-healing** — auto-retries through transient network drops; a manual Retry
-  button appears if it can't recover on its own.
+```sh
+python -m camoufox fetch
+python package_portable.py
+```
 
-The build does **not** bundle the browser binary, keeping the exe small; the
-Playwright driver that launches it *is* bundled.
-
-> Verified end-to-end from the packaged exe: server boot, engine detection, profile
-> create / bulk-create, and a real browser launch. Any server error is also written
-> to `%USERPROFILE%\.antidetect\error.log` for troubleshooting (no console needed).
-
-> **Version note:** requires the **Camoufox 0.5.x** Python package (tested with 0.5.8
-> and browser 156.0.1-beta.36, Python 3.12). The management server and API also run
-> without the browser downloaded. Everything works except launching a Camoufox
-> window, which shows a clear "download the engine" message instead.
+Extract `dist/ManyFaces-Portable.zip` and keep the `browser/` directory next to
+the executable. The bundled Camoufox binary is specific to the build platform.
 
 ## Troubleshooting
 
-- **`ValueError: No recorded WebGL data for vendor … and renderer …`** happens with
-  ManyFaces versions before this fix on Camoufox 0.5+. Update ManyFaces: stored GPU
-  pairs are now migrated to ones the engine accepts, and phone GPUs are applied
-  after validation. Don't pin `camoufox==0.4.x` as a workaround: `requirements.txt`
-  now targets 0.5.x.
-- **A launch shows "⚠ failed"**: click the pill for a short explanation. The full
-  traceback is in `~/.antidetect/error.log`.
-- **`WebGLRenderingContext.getParameter(RENDERER)` shows your real GPU** while the
-  `UNMASKED_RENDERER` value is spoofed. Stock Camoufox 0.5.8 does this too (it's
-  an engine behaviour, not something ManyFaces sets).
+- Select **Failed** on a profile to see its launch error. More detail is
+  available in `~/.antidetect/error.log`.
+- If Chromium is missing, run `python -m playwright install chromium` in the
+  same Python environment that runs ManyFaces.
+- Stop a running profile before editing or randomizing it.
+- For Android setup and boot errors, check the installer log in the dashboard
+  and confirm virtualization is enabled on your machine.
 
-## Automation example
+## Development
 
-```python
-from antidetect.automate import launch
+The dashboard is in [web/](web/). The FastAPI server, profile storage, and
+engine integrations are in [antidetect/](antidetect/). The server exposes
+interactive API documentation at `/docs`.
 
-with launch("<profile-id>", headless=True) as ctx:
-    page = ctx.new_page()
-    page.goto("https://abrahamjuliot.github.io/creepjs/")
-    page.screenshot(path="creep.png")
-```
-
-Async version: `antidetect.automate.launch_async`.
-
-## Architecture
-
-```
-run.py                 -> starts uvicorn + opens dashboard
-antidetect/
-  api.py               -> FastAPI: profile CRUD, launch, proxy test, cookies, Android setup
-  browser.py           -> Camoufox + Chromium session manager (threaded, headful)
-  android.py           -> real Android (AVD) engine: SDK install, emulator boot, scrcpy mirror
-  automate.py          -> scripting entry points (sync + async), same launch path as the app
-  fingerprint.py       -> coherent fingerprint generation (desktop + phone presets),
-                          migration of stored fingerprints to the installed engine
-  proxy.py             -> proxy connectivity/geo testing
-  cookies.py           -> cookie import/export/random
-  models.py            -> Pydantic schemas
-  db.py                -> SQLite profile storage
-  config.py            -> paths & settings
-web/
-  index.html/app.js/style.css  -> dashboard (vanilla JS)
-  mobile_start.html            -> phone home screen served to emulated-phone profiles
-```
-
-Profile metadata lives in SQLite (`~/.antidetect/antidetect.db`); persistent browser
-data lives on disk per profile. The Android SDK, AVDs, and scrcpy live under
-`~/.antidetect/android/`.
-
-## Development checks
-
-Run the offline regression suite without downloading browser engines:
-
-```bash
-pip install fastapi "httpx[socks]" requests uvicorn
+```sh
 python -m unittest discover -s tests -v
 node --check web/app.js
 ```
 
-CI runs these checks on Windows and Linux with Python 3.12 and 3.14.
-To include the real Chromium dashboard test, install Playwright and its browser:
+To include the Chromium dashboard check, install the Playwright browser and
+set `MANYFACES_BROWSER_TESTS=1` before running the test suite. In PowerShell,
+use `$env:MANYFACES_BROWSER_TESTS = '1'`. The browser test writes screenshots
+to `.testdata/`.
 
-```bash
-pip install playwright
-python -m playwright install chromium
-MANYFACES_BROWSER_TESTS=1 python -m unittest discover -s tests -v
+To regenerate the dashboard logo and Windows icon, install Pillow and run
+`python assets/make_icon.py`.
+
+### Python automation
+
+Use a saved Camoufox profile from Python. See
+[antidetect/automate.py](antidetect/automate.py) for the async entry point.
+
+```python
+from antidetect.automate import launch
+
+with launch("<profile-id>", headless=True) as browser:
+    page = browser.new_page()
+    page.goto("https://example.com")
+    print(page.title())
 ```
-
-In PowerShell, set `$env:MANYFACES_BROWSER_TESTS='1'` before running the unittest
-command. The browser test checks sorting, search, filter persistence, selection,
-launch error recovery, and responsive layout. Screenshots go to `.testdata/`.
-Tests use temporary profile data and make no external proxy requests or Android
-launches. Hardware-dependent engine launches and portable builds need separate
-manual verification.
-
-## Roadmap toward parity with commercial tools
-
-- Authenticated / SOCKS proxy support for the real-Android engine (via a local
-  forwarding proxy, since the emulator only takes an unauthenticated HTTP proxy).
-- GPU-mode selector for the Android engine (software / host / auto) in the setup UI.
-- Team features: multi-user, roles, shared/encrypted proxy pool.
-- Profile "warm-up" automation and cookie robot.
-- Fingerprint quality scoring against CreepJS/Pixelscan in-app.
-- Folder organization (tags, bulk actions, and profile import/export are available).
