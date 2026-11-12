@@ -12,6 +12,7 @@ We hand it: the profile's persistent user-data dir, its proxy, its OS/locale, an
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import sys
@@ -177,8 +178,9 @@ _HOST_LINUX = sys.platform.startswith("linux")
 # absolute and as a share of the profile's screen. Below that it reads as a bot.
 _MIN_FIT_WINDOW = (1024, 600)
 _MIN_FIT_SHARE = 0.6
-# Gap a fitted window keeps from the workarea edges, drawn per profile so that
-# outerWidth * dpr never equals the operator's workarea (a cross-profile watermark).
+# Gap a fitted window keeps from the workarea edges, drawn per profile so that a
+# FITTED window's outerWidth * dpr never equals the operator's workarea (a
+# cross-profile watermark). An unfitted window is the profile's own and host-free.
 _FIT_INSET_W = (32, 128)
 _FIT_INSET_H = (24, 80)
 
@@ -191,7 +193,8 @@ class DisplayFitError(BrowserError, ValueError):
         self.profile_id = profile_id
         self.css_px = css_px
         self.scale = scale
-        self.required_px = (round(css_px[0] * scale), round(css_px[1] * scale))
+        # Ceil: a fractional pixel still needs a whole one, and the refusal is exact.
+        self.required_px = (math.ceil(css_px[0] * scale), math.ceil(css_px[1] * scale))
         self.available_px = available_px
         self.mobile = mobile
         super().__init__(
@@ -217,7 +220,8 @@ class DisplayFitError(BrowserError, ValueError):
 
 def virtual_display_available() -> bool:
     """Whether headless="virtual" (Camoufox on an Xvfb display) can run here."""
-    return _HOST_LINUX and shutil.which("Xvfb") is not None
+    # Camoufox's VirtualDisplay execs Xvfb under util-linux's setpriv (--pdeathsig).
+    return _HOST_LINUX and all(shutil.which(b) for b in ("Xvfb", "setpriv"))
 
 
 def _render_scale(fp) -> float:
@@ -289,6 +293,12 @@ def _x11_workarea() -> tuple[int, int] | None:
         x.XCloseDisplay(dpy)
 
 
+# libX11 (here and inside screeninfo) isn't thread-safe without XInitThreads, which
+# must precede every other Xlib call in the process; probes come from API and
+# session threads at once, so serialize them instead.
+_DISPLAY_PROBE_LOCK = threading.Lock()
+
+
 def _host_workarea() -> tuple[int, int] | None:
     """Usable display area for a headful window, in the units Camoufox bounds it by.
 
@@ -302,7 +312,9 @@ def _host_workarea() -> tuple[int, int] | None:
         return None
     if not has_display(os.environ):
         return None
-    mon = largest_display()
+    with _DISPLAY_PROBE_LOCK:
+        mon = largest_display()
+        work = _x11_workarea() if _HOST_LINUX else None
     if mon is None:
         return None
     w, h = mon.width, mon.height
@@ -310,7 +322,6 @@ def _host_workarea() -> tuple[int, int] | None:
     # back to full monitor bounds (their DPR scale is 1, so the HiDPI failure can't
     # happen there). Add SPI_GETWORKAREA / NSScreen.visibleFrame if needed.
     # A multi-monitor workarea spans every monitor, so cap it by the one we size for.
-    work = _x11_workarea() if _HOST_LINUX else None
     if work:
         w, h = min(w, work[0]), min(h, work[1])
     return w, h
@@ -330,7 +341,8 @@ def host_display_limit() -> tuple[int, int] | None:
         return None
     if not has_display(os.environ):
         return None
-    mon = largest_display()
+    with _DISPLAY_PROBE_LOCK:
+        mon = largest_display()
     return (mon.width, mon.height) if mon else None
 
 

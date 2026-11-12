@@ -77,8 +77,13 @@ async def launch_async(profile_or_id, headless: bool | str | None = None):
     """Yield an async Camoufox BrowserContext for the given profile (see `launch`)."""
     from camoufox.async_api import AsyncCamoufox
 
+    import asyncio
+
     profile = _resolve(profile_or_id)
-    with virtual_display(headless) as display:
+    # Starting/killing Xvfb blocks (up to ~30 s); keep it off the event loop.
+    cm = virtual_display(headless)
+    display = await asyncio.to_thread(cm.__enter__)
+    try:
         opts = camoufox_launch_options(profile, headless=headless, virtual_display=display)
         async with AsyncCamoufox(from_options=opts, persistent_context=True) as ctx:
             staged = cookie_store.load(profile.id)
@@ -88,3 +93,5 @@ async def launch_async(profile_or_id, headless: bool | str | None = None):
                 except Exception:  # noqa: BLE001
                     pass
             yield ctx
+    finally:
+        await asyncio.to_thread(cm.__exit__, None, None, None)

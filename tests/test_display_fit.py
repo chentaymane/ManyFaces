@@ -289,5 +289,79 @@ class X11WorkareaTests(unittest.TestCase):
             self.assertEqual(browser._host_workarea(), (3840, 1024))
 
 
+
+class _Fn:
+    """A callable that, like a ctypes function, accepts restype/argtypes."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, *args):
+        return self.fn(*args)
+
+
+class FakeX11:
+    """Just enough libX11 for _x11_workarea: one root property holding `values`."""
+
+    def __init__(self, values, fmt=32):
+        import ctypes
+
+        self.freed = self.closed = False
+        buf = (ctypes.c_ulong * len(values))(*values)
+
+        def get_property(dpy, win, atom, off, length, delete, req, rtype, fmt_p, count_p, after, data_p):
+            fmt_p._obj.value = fmt
+            count_p._obj.value = len(values)
+            # Point the caller's `unsigned long *` at our buffer.
+            ctypes.cast(ctypes.addressof(data_p._obj), ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.addressof(buf)
+            return 0
+
+        self._buf = buf
+        self.XOpenDisplay = _Fn(lambda name: 1)
+        self.XDefaultRootWindow = _Fn(lambda dpy: 1)
+        self.XInternAtom = _Fn(lambda *a: 99)
+        self.XGetWindowProperty = _Fn(get_property)
+        self.XFree = _Fn(lambda ptr: setattr(self, "freed", True))
+        self.XCloseDisplay = _Fn(lambda dpy: setattr(self, "closed", True))
+
+
+class X11ParsingTests(unittest.TestCase):
+    def probe(self, fake):
+        with patch.dict("os.environ", {"DISPLAY": ":0"}), patch("ctypes.util.find_library", return_value="libX11.so"), \
+                patch("ctypes.CDLL", return_value=fake):
+            return browser._x11_workarea()
+
+    def test_reads_width_and_height_of_desktop_zero(self):
+        fake = FakeX11([0, 32, 1864, 1040, 0, 32, 1864, 1040])
+        self.assertEqual(self.probe(fake), (1864, 1040))
+        self.assertTrue(fake.freed and fake.closed)
+
+    def test_rejects_short_or_wrong_format_properties(self):
+        for fake in (FakeX11([0, 0, 1920]), FakeX11([0, 0, 1920, 1080], fmt=8), FakeX11([0, 0, 0, 0])):
+            self.assertIsNone(self.probe(fake))
+            self.assertTrue(fake.freed and fake.closed)
+
+
+class ReviewRegressionTests(IsolatedData):
+    def test_virtual_display_needs_setpriv_too(self):
+        with patch.object(browser, "_HOST_LINUX", True), \
+                patch.object(browser.shutil, "which", side_effect=lambda b: None if b == "setpriv" else "/usr/bin/" + b):
+            self.assertFalse(browser.virtual_display_available())
+
+    def test_required_pixels_round_up(self):
+        err = browser.DisplayFitError("x", (412, 919), 3.5, (1442, 3216), True)
+        self.assertEqual(err.required_px, (1442, 3217))
+
+    def test_randomize_keeps_a_fitting_profile_fitting(self):
+        client = TestClient(api.app)
+        p = db.create(profile("windows", screen_width=1536, screen_height=864, device_pixel_ratio=1.25))
+        with patch.object(browser, "host_display_limit", return_value=(1920, 1080)):
+            for _ in range(20):
+                fp = client.post(f"/api/profiles/{p.id}/fingerprint/randomize").json()["fingerprint"]
+                pw, ph = F.physical_size(fp["screen_width"], fp["screen_height"], fp["device_pixel_ratio"])
+                self.assertLessEqual(pw, 1920)
+                self.assertLessEqual(ph, 1080)
+
+
 if __name__ == "__main__":
     unittest.main()

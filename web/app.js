@@ -265,7 +265,7 @@ $("#bulk-bar").addEventListener("click", async (e) => {
   if (act === "delete" && !confirm(`Delete ${ids.length} profile(s) and all their data?`)) return;
   if (act === "randomize" && !confirm(`Regenerate fingerprint + cookies for ${ids.length} profile(s)?`)) return;
   b.disabled = true; const lbl = b.textContent; b.textContent = "…";
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, fitErr = null;
   for (const id of ids) {
     try {
       if (act === "launch") await api(`/api/profiles/${id}/start`, { method: "POST" });
@@ -273,10 +273,14 @@ $("#bulk-bar").addEventListener("click", async (e) => {
       else if (act === "delete") { await api(`/api/profiles/${id}`, { method: "DELETE" }); selected.delete(id); }
       else if (act === "randomize") await api(`/api/profiles/${id}/randomize-all`, { method: "POST", body: JSON.stringify({ seed_cookies: 15 }) });
       ok++;
-    } catch (_) { fail++; }
+    } catch (err) {
+      fail++;
+      if (act === "launch" && !fitErr && err.detail && err.detail.code === "display_fit") fitErr = [id, err.detail];
+    }
   }
   b.disabled = false; b.textContent = lbl;
   toast(`${act}: ${ok} done${fail ? `, ${fail} failed` : ""}`, fail ? "err" : "ok");
+  if (fitErr) openFit(...fitErr);  // explain the first profile that can't fit this display
   loadProfiles();
 });
 

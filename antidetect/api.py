@@ -721,7 +721,14 @@ def _regenerate(profile: Profile, os_name: str | None) -> FingerprintModel:
     old = profile.fingerprint
     if os_name is None:
         os_name = old.os
-    return FingerprintModel.from_fingerprint(fp_gen.generate(os_name=os_name))
+    # A profile whose panel fits this display keeps fitting after a re-roll, so a
+    # 'Fit this display' profile doesn't silently stop opening headful.
+    limit = browser_mod.host_display_limit()
+    if limit and not old.is_mobile:
+        pw, ph = fp_gen.physical_size(old.screen_width, old.screen_height, old.device_pixel_ratio)
+        if pw > limit[0] or ph > limit[1]:
+            limit = None
+    return FingerprintModel.from_fingerprint(fp_gen.generate(os_name=os_name, max_physical_size=limit))
 
 
 @app.post("/api/profiles/{profile_id}/fingerprint/randomize")
